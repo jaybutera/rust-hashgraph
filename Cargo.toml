@@ -1,0 +1,11 @@
+[package]
+name = "rust-hashgraph"
+version = "0.1.0"
+authors = ["Jay Butera <buterajay@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+rust-crypto = "0.2.36"
+serde = { version = "1.0", features = ["derive"] }
+libp2p = { git = "https://github.com/libp2p/rust-libp2p" }
+serde_json = "1.0"
