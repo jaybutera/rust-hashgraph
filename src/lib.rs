@@ -14,6 +14,25 @@ pub struct Context {
 #[derive(Serialize)]
 pub struct Transaction;
 
+/*
+#[derive(Serialize)]
+pub struct UpdateEvent {
+    creator: String,
+    self_parent: String,
+    other_parent: String,
+    txs: Vec<Transaction>,
+    witness: bool,
+}
+*/
+
+/*
+#[derive(Serialize)]
+pub enum Event {
+    Update(UpdateEvent),
+    Genesis(String),//{creator: String},
+}
+*/
+
 #[derive(Serialize)]
 pub enum Event {
     Update {
@@ -25,6 +44,30 @@ pub enum Event {
     },
     Genesis{creator: String},
 }
+
+struct EventIter {
+    node_list: Vec<Event>,
+    events: HashMap<
+}
+
+impl EventIter {
+    fn push_self_parents(&mut self, event_hash: String) {
+    }
+}
+
+impl Iterator for EventIter {
+    type Item = Event;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let event = match self.nodes.pop() {
+            Genesis{ .. } => return None,
+            Update{ other_parent, .. } => e,
+        }
+
+        self.push_self_parents(e.other_parent)
+    }
+}
+
 
 impl Event {
     pub fn determine_round(&self,
@@ -155,7 +198,7 @@ mod tests {
     fn test_ancestor() {
         let ([genesis, genesis1, e1, e2, e3], events, event_rounds) = generate();
 
-        assert!(
+        assert_eq!(
             true,
             Event::ancestor(
                 events.get(&e1).unwrap(),
@@ -180,7 +223,7 @@ mod tests {
             );
         */
 
-        assert!(
+        assert_eq!(
             true,
             Event::strongly_see(
                 context.events.get(&e2).unwrap(),
