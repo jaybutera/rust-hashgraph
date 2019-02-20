@@ -31,7 +31,7 @@ impl Event {
                            events: &EventGraph,
                            event_rounds: &HashMap<String,roundNum>) -> roundNum {
         match self {
-            Genesis => 1,
+            Event::Genesis{ .. } => 1,
             Event::Update{creator,self_parent,other_parent,txs,witness} => {
                 let sp_event = events.get(self_parent).unwrap();
                 let op_event = events.get(other_parent).unwrap();
@@ -73,28 +73,20 @@ impl Event {
 
     /// true if x can see events by more than 2n/3 creators, each of which sees y
     fn strongly_see(x: &Event, y: &Event, context: &Context) -> bool {
-        Event::strongly_see_aux(x,y,context,&HashMap::new())
+        Event::strongly_see_aux(x,y,context,&mut HashMap::new())
     }
-    fn strongly_see_aux(x: &Event, y: &Event, context: &Context, creators_seen: &HashMap<String,bool>) -> bool {
-        // Track unique creators that have seen x
-        //let creators_seen: HashMap<String,bool> = HashMap::new();
+    fn strongly_see_aux(x: &Event, y: &Event, context: &Context, creators_seen: &mut HashMap<String,bool>) -> bool {
+        if let Event::Update{creator,self_parent,other_parent,..} = x {
+        if x.hash() != y.hash()
+        {
+            creators_seen.insert(x.hash(), true);
+            Event::strongly_see_aux(context.events.get(self_parent).expect("failed to get sp"), y, &context, creators_seen);
+            Event::strongly_see_aux(context.events.get(other_parent).expect("failed to get op"), y, &context, creators_seen);
 
-        if x.hash() == y.hash() {
-            match y {
-                Event::Update{ creator, .. } => creators_seen.insert(creator.clone(), true),
-                Event::Genesis{creator} => creators_seen.insert(creator, true),
-            };
-            //creators_seen.insert(y.creator, true);
-            true
-        }
-        else {
-            if let Event::Update{creator,self_parent,other_parent,txs,witness} = x {
-                if Event::strongly_see_aux(context.events.get(self_parent).unwrap(), y, &context, &creators_seen)
-                   || Event::strongly_see_aux(context.events.get(other_parent).unwrap(), y, &context, &creators_seen)
-                { creators_seen.len() > 2*context.num_nodes/3 }
-                else { false }
-            } else { false }
-        }
+            if creators_seen.len() >= (2*context.num_nodes/3) { true }
+            else { false }
+        } else { false }
+        } else { false }
     }
 }
 
@@ -104,12 +96,12 @@ mod tests {
     //use hg_test::{Event,roundNum};
     use super::*;
 
-    fn generate() -> ([String; 4], EventGraph, HashMap<String,roundNum>) {
+    fn generate() -> ([String; 5], EventGraph, HashMap<String,roundNum>) {
         let c1 = "a".to_string();
         let c2 = "b".to_string();
         let c3 = "c".to_string();
-        let genesis = Event::Genesis(c3.clone());
-        let genesis1 = Event::Genesis(c2.clone());
+        let genesis = Event::Genesis{ creator:c3.clone() };
+        let genesis1 = Event::Genesis{ creator:c2.clone() };
 
         let e1 = Event::Update {
             creator: c1,
@@ -120,6 +112,13 @@ mod tests {
         };
         let e2 = Event::Update {
             creator: c2,
+            self_parent: genesis.hash(),
+            other_parent: e1.hash(),
+            txs: vec![],
+            witness: false,
+        };
+        let e3 = Event::Update {
+            creator: c3,
             self_parent: genesis.hash(),
             other_parent: e1.hash(),
             txs: vec![],
@@ -145,12 +144,16 @@ mod tests {
         event_rounds.insert(e2.hash(), e2.determine_round(&events,&event_rounds));
         events.insert(e2.hash(), e2);
 
-        ([g_hash, g1_hash, e1_hash, e2_hash], events, event_rounds)
+        let e3_hash = e3.hash();
+        event_rounds.insert(e3.hash(), e3.determine_round(&events,&event_rounds));
+        events.insert(e3.hash(), e3);
+
+        ([g_hash, g1_hash, e1_hash, e2_hash, e3_hash], events, event_rounds)
     }
 
     #[test]
     fn test_ancestor() {
-        let ([genesis, genesis1, e1, e2], events, event_rounds) = generate();
+        let ([genesis, genesis1, e1, e2, e3], events, event_rounds) = generate();
 
         assert!(
             true,
@@ -163,15 +166,26 @@ mod tests {
 
     #[test]
     fn test_strongly_see() {
-        let ([genesis, genesis1, e1, e2], events, event_rounds) = generate();
+        let ([genesis, genesis1, e1, e2, e3], events, event_rounds) = generate();
         let context = Context {
             events: events,
             num_nodes: 3,
         };
+        /*
+        println!("{}",
+            Event::strongly_see(
+                context.events.get(&e3).unwrap(),
+                context.events.get(&genesis).unwrap(),
+                &context)
+            );
+        */
 
-        Event::strongly_see(
-            context.events.get(&e2).unwrap(),
-            context.events.get(&genesis).unwrap(),
-            &context);
+        assert!(
+            true,
+            Event::strongly_see(
+                context.events.get(&e2).unwrap(),
+                context.events.get(&genesis).unwrap(),
+                &context)
+            );
     }
 }
