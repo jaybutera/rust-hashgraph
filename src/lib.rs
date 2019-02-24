@@ -20,7 +20,7 @@ pub enum Event {
         self_parent: String,
         other_parent: String,
         txs: Vec<Transaction>,
-        witness: bool,
+        is_witness: bool,
     },
     Genesis{creator: String},
 }
@@ -70,24 +70,6 @@ impl Event {
         hasher.result_str()
     }
 }
-    /*
-    pub fn determine_round(&self,
-                           events: &EventGraph,
-                           event_rounds: &HashMap<String,roundNum>) -> roundNum {
-        match self {
-            Event::Genesis{ .. } => 1,
-            Event::Update{creator,self_parent,other_parent,txs,witness} => {
-                let sp_event = events.get(self_parent).unwrap();
-                let op_event = events.get(other_parent).unwrap();
-
-                std::cmp::max(
-                    sp_event.determine_round(events,event_rounds),
-                    op_event.determine_round(events,event_rounds)
-                )
-            },
-        }
-    }
-    */
 
 impl Graph {
     pub fn iter(&self, event_hash: &String) -> EventIter {
@@ -101,6 +83,27 @@ impl Graph {
 
         e
     }
+
+    pub fn determine_round(&self, event_hash: &String) -> RoundNum {
+        let event = self.events.get(event_hash).unwrap();
+        match event {
+            Event::Genesis{ .. } => 1,
+            Event::Update{ self_parent, other_parent, is_witness, .. } => {
+                let r = std::cmp::max(
+                    self.determine_round(self_parent),
+                    self.determine_round(other_parent),
+                );
+
+                if *is_witness { r+1 } else { r }
+            },
+        }
+    }
+
+    /*
+    pub fn determine_witness(&self, event_hash: &String) -> {
+        let event = self.events.get(event_hash).unwrap();
+    }
+    */
 
     fn ancestor(&self, x_hash: &String, y_hash: &String) -> bool {
         let x = self.events.get(x_hash).unwrap();
@@ -145,21 +148,21 @@ mod tests {
             self_parent: genesis1.hash(),
             other_parent: genesis2.hash(),
             txs: vec![],
-            witness: false,
+            is_witness: false,
         };
         let e2 = Event::Update {
             creator: c2,
             self_parent: genesis2.hash(),
             other_parent: e1.hash(),
             txs: vec![],
-            witness: false,
+            is_witness: false,
         };
         let e3 = Event::Update {
             creator: c3,
             self_parent: genesis3.hash(),
             other_parent: e2.hash(),
             txs: vec![],
-            witness: false,
+            is_witness: false,
         };
 
         let mut events = HashMap::new();
