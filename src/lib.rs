@@ -2,36 +2,24 @@ use serde::Serialize;
 use crypto::sha3::Sha3;
 use crypto::digest::Digest;
 use std::collections::HashMap;
+use self::Event::*;
 
-pub type roundNum = usize;
+pub type RoundNum = usize;
+/*
 pub type EventGraph = HashMap<String,Event>;
 
 pub struct Context {
     pub events: EventGraph,
     pub num_nodes: usize,
 }
+*/
 
 #[derive(Serialize)]
 pub struct Transaction;
 
-/*
-#[derive(Serialize)]
-pub struct UpdateEvent {
-    creator: String,
-    self_parent: String,
-    other_parent: String,
-    txs: Vec<Transaction>,
-    witness: bool,
+pub struct Graph {
+    events: HashMap<String, Event>,
 }
-*/
-
-/*
-#[derive(Serialize)]
-pub enum Event {
-    Update(UpdateEvent),
-    Genesis(String),//{creator: String},
-}
-*/
 
 #[derive(Serialize)]
 pub enum Event {
@@ -45,31 +33,50 @@ pub enum Event {
     Genesis{creator: String},
 }
 
-struct EventIter {
-    node_list: Vec<Event>,
-    events: HashMap<
+pub struct EventIter<'a> {
+    node_list: Vec<&'a Event>,
+    events: &'a HashMap<String, Event>,
 }
 
-impl EventIter {
-    fn push_self_parents(&mut self, event_hash: String) {
+impl<'a> EventIter<'a> {
+    fn push_self_parents(&mut self, event_hash: &String) {
+        let mut e = self.events.get(event_hash).unwrap();
+        loop {
+            self.node_list.push(e);
+            if let Update{ ref self_parent, .. } = *e {
+                e = self.events.get(self_parent).unwrap();
+            } else { break; }
+        }
     }
 }
 
-impl Iterator for EventIter {
-    type Item = Event;
+impl<'a> Iterator for EventIter<'a> {
+    type Item = &'a Event;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let event = match self.nodes.pop() {
-            Genesis{ .. } => return None,
-            Update{ other_parent, .. } => e,
-        }
+        let event = match self.node_list.pop() {
+            None => return None,
+            Some(e) => e,
+        };
+        println!("{}",event.hash());
 
-        self.push_self_parents(e.other_parent)
+        if let Update{ ref other_parent, .. } = *event {
+            self.push_self_parents(other_parent);
+        }
+        Some(event)
     }
 }
 
 
 impl Event {
+    pub fn hash(&self) -> String {
+        let mut hasher = Sha3::sha3_256();
+        let serialized = serde_json::to_string(self).unwrap();
+        hasher.input_str(&serialized[..]);
+        hasher.result_str()
+    }
+}
+    /*
     pub fn determine_round(&self,
                            events: &EventGraph,
                            event_rounds: &HashMap<String,roundNum>) -> roundNum {
@@ -131,15 +138,37 @@ impl Event {
         } else { false }
         } else { false }
     }
+    */
+
+impl Graph {
+    pub fn iter(&self, event: &Event) -> EventIter {
+        //let event = self.events.get(event_hash).unwrap();
+        let mut e = EventIter { node_list: vec![], events: &self.events };
+        match *event {
+            Update { ref self_parent, .. } => e.push_self_parents(self_parent),
+            _ => (),
+        }
+        e
+    }
+
+    fn ancestor(&self, x_hash: &String, y_hash: &String) -> bool {
+        let x = self.events.get(x_hash).unwrap();
+        let y = self.events.get(y_hash).unwrap();
+        println!("y hash: {}",y_hash);
+
+        match self.iter(x).find(|e| e.hash() == *y_hash) {
+            Some(_) => true,
+            None => false,
+    }
+}
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    //use hg_test::{Event,roundNum};
     use super::*;
 
-    fn generate() -> ([String; 5], EventGraph, HashMap<String,roundNum>) {
+    fn generate() -> (Graph, [String;5]) {//([String; 5], EventGraph, HashMap<String,roundNum>) {
         let c1 = "a".to_string();
         let c2 = "b".to_string();
         let c3 = "c".to_string();
@@ -168,45 +197,46 @@ mod tests {
             witness: false,
         };
 
-        let mut events: EventGraph = HashMap::new();
-        let mut event_rounds: HashMap<String,roundNum> = HashMap::new();
+        let mut events = HashMap::new();
+        //let mut event_rounds: HashMap<String,RoundNum> = HashMap::new();
 
         let g_hash = genesis.hash();
-        event_rounds.insert(genesis.hash(), 1);
+        //event_rounds.insert(genesis.hash(), 1);
         events.insert(genesis.hash(), genesis);
 
         let g1_hash = genesis1.hash();
-        event_rounds.insert(genesis1.hash(), 1);
+        //event_rounds.insert(genesis1.hash(), 1);
         events.insert(genesis1.hash(), genesis1);
 
         let e1_hash = e1.hash();
-        event_rounds.insert(e1.hash(), e1.determine_round(&events,&event_rounds));
+        //event_rounds.insert(e1.hash(), e1.determine_round(&events,&event_rounds));
         events.insert(e1.hash(), e1);
 
         let e2_hash = e2.hash();
-        event_rounds.insert(e2.hash(), e2.determine_round(&events,&event_rounds));
+        //event_rounds.insert(e2.hash(), e2.determine_round(&events,&event_rounds));
         events.insert(e2.hash(), e2);
 
         let e3_hash = e3.hash();
-        event_rounds.insert(e3.hash(), e3.determine_round(&events,&event_rounds));
+        //event_rounds.insert(e3.hash(), e3.determine_round(&events,&event_rounds));
         events.insert(e3.hash(), e3);
 
-        ([g_hash, g1_hash, e1_hash, e2_hash, e3_hash], events, event_rounds)
+        (Graph { events }, [g_hash, g1_hash, e1_hash, e2_hash, e3_hash])
+        //([g_hash, g1_hash, e1_hash, e2_hash, e3_hash], events, event_rounds)
     }
 
     #[test]
     fn test_ancestor() {
-        let ([genesis, genesis1, e1, e2, e3], events, event_rounds) = generate();
+        //let ([genesis, genesis1, e1, e2, e3], events, event_rounds) = generate();
+        let (graph, event_hashes) = generate();
 
         assert_eq!(
             true,
-            Event::ancestor(
-                events.get(&e1).unwrap(),
-                events.get(&genesis).unwrap(),
-                &events)
-            )
+            graph.ancestor(
+                &event_hashes[2],
+                &event_hashes[0]))
     }
 
+    /*
     #[test]
     fn test_strongly_see() {
         let ([genesis, genesis1, e1, e2, e3], events, event_rounds) = generate();
@@ -231,4 +261,5 @@ mod tests {
                 &context)
             );
     }
+*/
 }
