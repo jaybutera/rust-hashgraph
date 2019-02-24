@@ -10,7 +10,9 @@ pub type RoundNum = usize;
 pub struct Transaction;
 
 pub struct Graph {
-    events: HashMap<String, Event>,
+    pub events: HashMap<String, Event>,
+    //round_index: Vec<HashMap<String, &'a Event>>,
+    round_index: Vec<HashSet<String>>,
 }
 
 #[derive(Serialize)]
@@ -72,6 +74,33 @@ impl Event {
 }
 
 impl Graph {
+    pub fn new() -> Self {
+        Graph {
+            events: HashMap::new(),
+            round_index: vec![HashSet::new()],
+        }
+    }
+
+    pub fn add_event(&mut self, event: Event) {
+        let event_hash = event.hash();
+        self.events.insert(event_hash.clone(), event);
+        let r = self.determine_round(&event_hash);
+
+        // Push onto events map
+        let last_idx = self.round_index.len()-1;
+
+        if r > last_idx {
+            // Create a new round
+            let mut hs = HashSet::new();
+            hs.insert(event_hash);
+            self.round_index.push(hs);
+        }
+        else {
+            // Otherwise push onto current round
+            self.round_index[last_idx].insert(event_hash);
+        }
+    }
+
     pub fn iter(&self, event_hash: &String) -> EventIter {
         let event = self.events.get(event_hash).unwrap();
         let mut e = EventIter { node_list: vec![], events: &self.events };
@@ -87,7 +116,7 @@ impl Graph {
     pub fn determine_round(&self, event_hash: &String) -> RoundNum {
         let event = self.events.get(event_hash).unwrap();
         match event {
-            Event::Genesis{ .. } => 1,
+            Event::Genesis{ .. } => 0,
             Event::Update{ self_parent, other_parent, is_witness, .. } => {
                 let r = std::cmp::max(
                     self.determine_round(self_parent),
@@ -99,11 +128,33 @@ impl Graph {
         }
     }
 
-    /*
-    pub fn determine_witness(&self, event_hash: &String) -> {
+    /// Determines if an event is a witness of the latest round
+    pub fn determine_witness(&self, event_hash: &String, n: usize) -> bool {
         let event = self.events.get(event_hash).unwrap();
+        //let round = &self.round_index[self.round_index.len()-1];
+        let round = self.round_index[self.round_index.len()-1].iter()
+            .filter(|eh| *eh != event_hash)
+            .map(|e_hash| self.events.get(e_hash).unwrap())
+            .collect::<Vec<_>>();
+
+        let witnesses_strongly_seen = round.iter()
+            .filter(|e| match e {
+                Genesis{ .. } => true,
+                Update{ is_witness, .. } => *is_witness,
+            })
+            .fold(HashSet::new(), |mut set, e| {
+                if self.strongly_see(event_hash, &e.hash(), n) {
+                    let creator = match *e {
+                        Update{ ref creator, .. } => creator,
+                        Genesis{ ref creator } => creator,
+                    };
+                    set.insert(creator.clone());
+                }
+                set
+            });
+
+        witnesses_strongly_seen.len() >= (2*n/3) // TODO: Change to just > (for strongly_see too)
     }
-    */
 
     fn ancestor(&self, x_hash: &String, y_hash: &String) -> bool {
         let x = self.events.get(x_hash).unwrap();
@@ -165,27 +216,27 @@ mod tests {
             is_witness: false,
         };
 
-        let mut events = HashMap::new();
+        let mut graph = Graph::new();
 
         let g1_hash = genesis1.hash();
-        events.insert(genesis1.hash(), genesis1);
+        graph.add_event(genesis1);
 
         let g2_hash = genesis2.hash();
-        events.insert(genesis2.hash(), genesis2);
+        graph.add_event(genesis2);
 
         let g3_hash = genesis3.hash();
-        events.insert(genesis3.hash(), genesis3);
+        graph.add_event(genesis3);
 
         let e1_hash = e1.hash();
-        events.insert(e1.hash(), e1);
+        graph.add_event(e1);
 
         let e2_hash = e2.hash();
-        events.insert(e2.hash(), e2);
+        graph.add_event(e2);
 
         let e3_hash = e3.hash();
-        events.insert(e3.hash(), e3);
+        graph.add_event(e3);
 
-        (Graph { events }, [g1_hash, g2_hash, g3_hash, e1_hash, e2_hash, e3_hash])
+        (graph, [g1_hash, g2_hash, g3_hash, e1_hash, e2_hash, e3_hash])
     }
 
     #[test]
@@ -209,5 +260,16 @@ mod tests {
                 &event_hashes[5],
                 &event_hashes[0],
                 3))
+    }
+
+    #[test]
+    fn test_determine_round() {
+        let (graph, event_hashes) = generate();
+
+        for eh in &event_hashes {
+            assert_eq!(
+                true,
+                graph.round_index[graph.determine_round(eh)].contains(eh));
+        }
     }
 }
