@@ -11,7 +11,7 @@ pub struct Transaction;
 
 pub struct Graph {
     pub events: HashMap<String, Event>,
-    //round_index: Vec<HashMap<String, &'a Event>>,
+    pub creators: HashSet<String>,
     round_index: Vec<HashSet<String>>,
 }
 
@@ -78,6 +78,7 @@ impl Graph {
         Graph {
             events: HashMap::new(),
             round_index: vec![HashSet::new()],
+            creators: HashSet::new(),
         }
     }
 
@@ -85,6 +86,21 @@ impl Graph {
         let event_hash = event.hash();
         self.events.insert(event_hash.clone(), event);
         let r = self.determine_round(&event_hash);
+
+        {
+            let event = self.events.get(&event_hash).unwrap();
+
+            // Add creator if not already
+            match event {
+                Genesis{ creator, .. } => self.creators.insert(creator.clone()),
+                Update { creator, mut is_witness, .. } => {
+                    self.creators.insert(creator.clone());
+                    // Assign if witness
+                    is_witness = self.determine_witness(&event_hash);
+                    true
+                },
+            };
+        }
 
         // Push onto events map
         let last_idx = self.round_index.len()-1;
@@ -129,9 +145,9 @@ impl Graph {
     }
 
     /// Determines if an event is a witness of the latest round
-    pub fn determine_witness(&self, event_hash: &String, n: usize) -> bool {
+    pub fn determine_witness(&self, event_hash: &String) -> bool {
         let event = self.events.get(event_hash).unwrap();
-        //let round = &self.round_index[self.round_index.len()-1];
+
         let round = self.round_index[self.round_index.len()-1].iter()
             .filter(|eh| *eh != event_hash)
             .map(|e_hash| self.events.get(e_hash).unwrap())
@@ -143,7 +159,7 @@ impl Graph {
                 Update{ is_witness, .. } => *is_witness,
             })
             .fold(HashSet::new(), |mut set, e| {
-                if self.strongly_see(event_hash, &e.hash(), n) {
+                if self.strongly_see(event_hash, &e.hash()) {
                     let creator = match *e {
                         Update{ ref creator, .. } => creator,
                         Genesis{ ref creator } => creator,
@@ -153,7 +169,10 @@ impl Graph {
                 set
             });
 
-        witnesses_strongly_seen.len() >= (2*n/3) // TODO: Change to just > (for strongly_see too)
+        // n is number of members in hashgraph
+        let n = self.creators.len();
+
+        witnesses_strongly_seen.len() > (2*n/3)
     }
 
     fn ancestor(&self, x_hash: &String, y_hash: &String) -> bool {
@@ -166,7 +185,7 @@ impl Graph {
         }
     }
 
-    fn strongly_see(&self, x_hash: &String, y_hash: &String, n: usize) -> bool {
+    fn strongly_see(&self, x_hash: &String, y_hash: &String) -> bool {
         let creators_seen = self.iter(x_hash)
             .filter(|e| self.ancestor(x_hash,y_hash))
             .fold(HashSet::new(), |mut set, event| {
@@ -177,7 +196,9 @@ impl Graph {
                 set.insert(creator.clone());
                 set
             });
-        creators_seen.len() >= (2*n/3)
+
+        let n = self.creators.len();
+        creators_seen.len() > (2*n/3)
     }
 }
 
@@ -258,8 +279,7 @@ mod tests {
             true,
             graph.strongly_see(
                 &event_hashes[5],
-                &event_hashes[0],
-                3))
+                &event_hashes[0]))
     }
 
     #[test]
@@ -271,5 +291,17 @@ mod tests {
                 true,
                 graph.round_index[graph.determine_round(eh)].contains(eh));
         }
+    }
+
+    #[test]
+    fn test_determine_witness() {
+        let (graph, event_hashes) = generate();
+
+        assert_eq!(
+            false,
+            graph.determine_witness(&event_hashes[4]));
+        assert_eq!(
+            true,
+            graph.determine_witness(&event_hashes[5]))
     }
 }
