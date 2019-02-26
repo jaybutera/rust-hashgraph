@@ -6,3 +6,7 @@ For now, you can just run the tests with ```cargo test```. The unit tests in the
 order all events topologically according to the HashGraph algorithm.
 
 ![Tests snapshot](https://i.imgur.com/eilv4Vk.png)
+
+## TODO
+- Nodes send and receive events on gossip network with rust-libp2p
+- Graph traversal optimizations
