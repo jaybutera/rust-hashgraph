@@ -165,6 +165,7 @@ impl Graph {
             .filter(|eh| *eh != event_hash)
             .map(|e_hash| self.events.get(e_hash).unwrap())
             .collect::<Vec<_>>();
+        println!("How far");
 
         // First check if member has any events in this round
         if round.iter()
@@ -177,6 +178,7 @@ impl Graph {
             }).collect::<Vec<_>>().is_empty() {
                 return false
         }
+        println!("Do I get");
 
         // Then find out how many witnesses by unique members strongly see the event
         let witnesses_strongly_seen = round.iter()
@@ -194,6 +196,7 @@ impl Graph {
 
         // n is number of members in hashgraph
         let n = self.creators.len();
+        println!("n:{}",witnesses_strongly_seen.len());
 
         witnesses_strongly_seen.len() > (2*n/3)
         }}
@@ -230,8 +233,8 @@ impl Graph {
     }
 
     fn strongly_see(&self, x_hash: &String, y_hash: &String) -> bool {
-        let creators_seen = self.iter(x_hash)
-            .filter(|e| self.ancestor(x_hash,y_hash))
+        let mut creators_seen = self.iter(x_hash)
+            .filter(|e| self.ancestor(&e.hash(),y_hash))
             .fold(HashSet::new(), |mut set, event| {
                 let creator = match *event {
                     Update{ ref creator, .. } => creator,
@@ -240,6 +243,12 @@ impl Graph {
                 set.insert(creator.clone());
                 set
             });
+
+        // TODO: This uses "to" as temporary, ultimately just use the member id
+        match self.events.get(x_hash).unwrap() {
+            Genesis{ .. } => true,
+            Update{ to, .. } => creators_seen.insert(to.clone()),
+        };
 
         let n = self.creators.len();
         creators_seen.len() > (2*n/3)
@@ -289,8 +298,8 @@ mod tests {
         };
         let e5 = Event::Update {
             creator: c2.clone(),
-            self_parent: e2.hash(),
-            other_parent: e3.hash(),
+            self_parent: e1.hash(),
+            other_parent: e4.hash(),
             txs: vec![],
             to: c1.clone()
         };
@@ -352,7 +361,7 @@ mod tests {
         assert_eq!(
             true,
             graph.strongly_see(
-                &event_hashes[5],
+                &event_hashes[6],
                 &event_hashes[0]))
     }
 
@@ -373,16 +382,26 @@ mod tests {
 
         assert_eq!(
             false,
-            graph.determine_witness(&event_hashes[4],0));
+            graph.determine_witness(&event_hashes[6],0));
         assert_eq!(
             true,
-            graph.determine_witness(&event_hashes[6],0))
+            graph.determine_witness(&event_hashes[7],0));
+        assert_eq!(
+            true,
+            graph.determine_witness(&event_hashes[8],0));
     }
 
     #[test]
     fn test_is_famous() {
         let (graph, event_hashes) = generate();
 
+        println!("{}",event_hashes[5]);
+        println!("{}",graph.determine_witness(&event_hashes[5],0));
+        println!("all witnesses");
+        for eh in &graph.is_famous {
+            let r = graph.round_index[1].contains(eh.0);
+            println!("{} in round {}",eh.0,r);
+        }
         assert_eq!(
             true,
             graph.is_famous(&event_hashes[0]))
