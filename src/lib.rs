@@ -2,30 +2,17 @@ use serde::Serialize;
 use crypto::sha3::Sha3;
 use crypto::digest::Digest;
 use std::collections::{HashMap,HashSet};
-use self::Event::*;
+
+mod event;
+use event::Event::{self,*};
 
 pub type RoundNum = usize;
-
-#[derive(Serialize)]
-pub struct Transaction;
 
 pub struct Graph {
     pub events: HashMap<String, Event>,
     creators: HashSet<String>,
     round_index: Vec<HashSet<String>>,
     is_famous: HashMap<String, bool>, // Some(false) means unfamous witness
-}
-
-#[derive(Serialize)]
-pub enum Event {
-    Update {
-        creator: String, // TODO: Change to a signature
-        self_parent: String,
-        other_parent: String,
-        txs: Vec<Transaction>,
-        to: String, // TODO: Temporary info just for simulation of multiple machines in one program
-    },
-    Genesis{creator: String},
 }
 
 pub struct EventIter<'a> {
@@ -61,16 +48,6 @@ impl<'a> Iterator for EventIter<'a> {
             self.push_self_parents(other_parent);
         }
         Some(event)
-    }
-}
-
-
-impl Event {
-    pub fn hash(&self) -> String {
-        let mut hasher = Sha3::sha3_256();
-        let serialized = serde_json::to_string(self).unwrap();
-        hasher.input_str(&serialized[..]);
-        hasher.result_str()
     }
 }
 
