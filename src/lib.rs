@@ -88,40 +88,33 @@ impl Graph {
         let event_hash = event.hash();
         self.events.insert(event_hash.clone(), event);
 
-        {
+        { // Add event to creators list if it isn't already there
             let event = self.events.get(&event_hash).unwrap();
-
-            // Add creator if not already
             match event {
-                Genesis{ creator, .. } => {
-                    self.is_famous.insert(event_hash.clone(), false);
-                    self.creators.insert(creator.clone())
-                },
-                Update { creator, .. } => {
-                    // Assign if witness
-                    //*is_witness = witness_status;
-                    let round_num = self.round_index.len()-1;
-                    if self.determine_witness(&event_hash, round_num) {
-                        self.is_famous.insert(event_hash.clone(), false);
-                    }
-                    self.creators.insert(creator.clone())
-                },
+                Genesis{ creator, .. } => self.creators.insert(creator.clone()),
+                Update { creator, .. } => self.creators.insert(creator.clone()),
             };
         }
 
-        // Push onto events map
+        //-- Set event's round
         let last_idx = self.round_index.len()-1;
         let r = self.determine_round(&event_hash);
 
         if r > last_idx {
             // Create a new round
             let mut hs = HashSet::new();
-            hs.insert(event_hash);
+            hs.insert(event_hash.clone());
             self.round_index.push(hs);
         }
         else {
             // Otherwise push onto current round
-            self.round_index[last_idx].insert(event_hash);
+            self.round_index[last_idx].insert(event_hash.clone());
+        }
+        //--
+
+        // Set witness status
+        if self.determine_witness(&event_hash) {
+            self.is_famous.insert(event_hash, false);
         }
     }
 
@@ -137,71 +130,63 @@ impl Graph {
         e
     }
 
-    /// Assumes witness status has been determined for the event in question
+    /// Determine the round an event belongs to, which is the max of its parents' rounds +1 if it
+    /// is a witness.
     pub fn determine_round(&self, event_hash: &String) -> RoundNum {
         let event = self.events.get(event_hash).unwrap();
         match event {
             Event::Genesis{ .. } => 0,
-            Event::Update{ self_parent, other_parent, .. } => {
+            Event::Update{ self_parent, other_parent, to, .. } => {
                 let r = std::cmp::max(
                     self.determine_round(self_parent),
                     self.determine_round(other_parent),
                 );
 
-                if let Some(_) = self.is_famous.get(event_hash) { r+1 } else { r }
+                // Get events from round r
+                let round = self.round_index[r].iter()
+                    .filter(|eh| *eh != event_hash)
+                    .map(|e_hash| self.events.get(e_hash).unwrap())
+                    .collect::<Vec<_>>();
+
+                // Find out how many witnesses by unique members strongly see the event
+                let witnesses_strongly_seen = round.iter()
+                    .filter(|e| if let Some(_) = self.is_famous.get(&e.hash()) { true } else { false })
+                    .fold(HashSet::new(), |mut set, e| {
+                        if self.strongly_see(event_hash, &e.hash()) {
+                            let creator = match *e {
+                                Update{ ref creator, .. } => creator,
+                                Genesis{ ref creator } => creator,
+                            };
+                            set.insert(creator.clone());
+                        }
+                        set
+                    });
+
+                // n is number of members in hashgraph
+                let n = self.creators.len();
+
+                if witnesses_strongly_seen.len() > (2*n/3) { r+1 } else { r }
             },
         }
     }
 
-    /// Determines if an event is a witness of the latest round
-    pub fn determine_witness(&self, event_hash: &String, round_num: RoundNum) -> bool {
-        let event = self.events.get(event_hash).unwrap();
-        match *event { // TODO: Ugly temporary for use of "to"
-            Genesis{ .. } => true,
-            Update{ ref to, .. } => {
-
-        //let round = self.round_index[self.round_index.len()-1].iter()
-        let round = self.round_index[round_num].iter()
-            .filter(|eh| *eh != event_hash)
-            .map(|e_hash| self.events.get(e_hash).unwrap())
-            .collect::<Vec<_>>();
-        println!("How far");
-
-        // First check if member has any events in this round
-        if round.iter()
-            .filter(|e| {
-                let creator = match *e {
-                    Update{ ref creator, .. } => creator,
-                    Genesis{ ref creator } => creator,
-                };
-                creator == to
-            }).collect::<Vec<_>>().is_empty() {
-                return false
-        }
-        println!("Do I get");
-
-        // Then find out how many witnesses by unique members strongly see the event
-        let witnesses_strongly_seen = round.iter()
-            .filter(|e| if let Some(_) = self.is_famous.get(&e.hash()) { true } else { false })
-            .fold(HashSet::new(), |mut set, e| {
-                if self.strongly_see(event_hash, &e.hash()) {
-                    let creator = match *e {
-                        Update{ ref creator, .. } => creator,
-                        Genesis{ ref creator } => creator,
-                    };
-                    set.insert(creator.clone());
-                }
-                set
-            });
-
-        // n is number of members in hashgraph
-        let n = self.creators.len();
-        println!("n:{}",witnesses_strongly_seen.len());
-
-        witnesses_strongly_seen.len() > (2*n/3)
-        }}
+    fn round_of(&self, event_hash: &String) -> RoundNum {
+        self.round_index.iter().enumerate()
+            .find(|(_,round)| round.contains(event_hash))
+            .expect("Failed to find a round for event").0
     }
 
+    /// Determines if the event is a witness
+    pub fn determine_witness(&self, event_hash: &String) -> bool {
+        match self.events.get(event_hash).unwrap() {
+            Genesis{ .. } => true,
+            Update{ self_parent, .. } =>
+                self.round_of(event_hash) > self.round_of(self_parent)
+        }
+    }
+
+    /// Determine if the event is famous.
+    /// An event is famous if 2/3 future witnesses strongly see it.
     fn is_famous(&self, event_hash: &String) -> bool {
         let event = self.events.get(event_hash).unwrap();
 
@@ -260,7 +245,7 @@ mod tests {
     use std::collections::HashMap;
     use super::*;
 
-    fn generate() -> (Graph, [String;9]) {
+    fn generate() -> (Graph, [String;10]) {
         let c1 = "a".to_string();
         let c2 = "b".to_string();
         let c3 = "c".to_string();
@@ -310,6 +295,13 @@ mod tests {
             txs: vec![],
             to: c3.clone()
         };
+        let e7 = Event::Update {
+            creator: c3.clone(),
+            self_parent: e4.hash(),
+            other_parent: e6.hash(),
+            txs: vec![],
+            to: c2.clone()
+        };
 
         let mut graph = Graph::new();
 
@@ -340,7 +332,10 @@ mod tests {
         let e6_hash = e6.hash();
         graph.add_event(e6);
 
-        (graph, [g1_hash, g2_hash, g3_hash, e1_hash, e2_hash, e3_hash, e4_hash, e5_hash, e6_hash])
+        let e7_hash = e7.hash();
+        graph.add_event(e7);
+
+        (graph, [g1_hash, g2_hash, g3_hash, e1_hash, e2_hash, e3_hash, e4_hash, e5_hash, e6_hash, e7_hash])
     }
 
     #[test]
@@ -382,26 +377,19 @@ mod tests {
 
         assert_eq!(
             false,
-            graph.determine_witness(&event_hashes[6],0));
+            graph.determine_witness(&event_hashes[6]));
         assert_eq!(
             true,
-            graph.determine_witness(&event_hashes[7],0));
+            graph.determine_witness(&event_hashes[7]));
         assert_eq!(
             true,
-            graph.determine_witness(&event_hashes[8],0));
+            graph.determine_witness(&event_hashes[8]));
     }
 
     #[test]
     fn test_is_famous() {
         let (graph, event_hashes) = generate();
 
-        println!("{}",event_hashes[5]);
-        println!("{}",graph.determine_witness(&event_hashes[5],0));
-        println!("all witnesses");
-        for eh in &graph.is_famous {
-            let r = graph.round_index[1].contains(eh.0);
-            println!("{} in round {}",eh.0,r);
-        }
         assert_eq!(
             true,
             graph.is_famous(&event_hashes[0]))
