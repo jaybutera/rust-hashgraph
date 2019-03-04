@@ -20,6 +20,7 @@ fn main() {
     // Create a floodsub for CRDTs
     let floodsub_topic = libp2p::floodsub::TopicBuilder::new("tmp").build();
 
+    /*
     let mut behaviour = CustomBehaviour {
             floodsub: libp2p::floodsub::Floodsub::new(local_pub_key.clone().into_peer_id()),
             mdns: libp2p::mdns::Mdns::new().expect("Failed to create mDNS service"),
@@ -30,4 +31,5 @@ fn main() {
         transport,
         behaviour,
         local_pub_key.clone().into_peer_id()).build();
+    */
 }
