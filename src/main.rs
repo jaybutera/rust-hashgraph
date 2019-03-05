@@ -1,35 +1,70 @@
 use libp2p::{secio,NetworkBehaviour};
 use libp2p::core::transport::Transport;
+use substrate_network_libp2p::{CustomMessage, Protocol, ServiceEvent, build_multiaddr};
+use futures::{future, stream, prelude::*, try_ready};
+use rand::seq::SliceRandom;
+use std::{io, iter};
 
-#[derive(NetworkBehaviour)]
-struct CustomBehaviour<TSubstream: libp2p::tokio_io::AsyncRead + libp2p::tokio_io::AsyncWrite> {
-    #[behaviour(handler = "on_floodsub")]
-    floodsub: libp2p::floodsub::Floodsub<TSubstream>,
-    mdns: libp2p::mdns::Mdns<TSubstream>,
+fn build_nodes<TMsg>(num: usize) -> Vec<substrate_network_libp2p::Service<TMsg>>
+	where TMsg: CustomMessage + Send + 'static
+{
+	let mut result: Vec<substrate_network_libp2p::Service<_>> = Vec::with_capacity(num);
+
+	for _ in 0 .. num {
+		let mut boot_nodes = Vec::new();
+		if !result.is_empty() {
+			let mut bootnode = result[0].listeners().next().unwrap().clone();
+			bootnode.append(Protocol::P2p(result[0].peer_id().clone().into()));
+			boot_nodes.push(bootnode.to_string());
+		}
+
+		let config = substrate_network_libp2p::NetworkConfiguration {
+			listen_addresses: vec![build_multiaddr![Ip4([127, 0, 0, 1]), Tcp(0u16)]],
+			boot_nodes,
+			..substrate_network_libp2p::NetworkConfiguration::default()
+		};
+
+		let proto = substrate_network_libp2p::RegisteredProtocol::new(*b"tst", &[1]);
+		result.push(substrate_network_libp2p::start_service(config, iter::once(proto)).unwrap());
+	}
+
+	result
+}
+
+fn basic_two_nodes_connectivity() {
+	let (mut service1, mut service2) = {
+		let mut l = build_nodes::<Vec<u8>>(2).into_iter();
+		let a = l.next().unwrap();
+		let b = l.next().unwrap();
+		(a, b)
+	};
+
+	let fut1 = future::poll_fn(move || -> io::Result<_> {
+		match try_ready!(service1.poll()) {
+			Some(ServiceEvent::OpenedCustomProtocol { protocol, version, .. }) => {
+				assert_eq!(protocol, *b"tst");
+				assert_eq!(version, 1);
+				Ok(Async::Ready(()))
+			},
+			_ => panic!(),
+		}
+	});
+
+	let fut2 = future::poll_fn(move || -> io::Result<_> {
+		match try_ready!(service2.poll()) {
+			Some(ServiceEvent::OpenedCustomProtocol { protocol, version, .. }) => {
+				assert_eq!(protocol, *b"tst");
+				assert_eq!(version, 1);
+				Ok(Async::Ready(()))
+			},
+			_ => panic!(),
+		}
+	});
+
+	let combined = fut1.select(fut2).map_err(|(err, _)| err);
+	tokio::runtime::Runtime::new().unwrap().block_on_all(combined).unwrap();
 }
 
 fn main() {
-
-    let local_key = secio::SecioKeyPair::ed25519_generated().unwrap();
-    let local_pub_key = local_key.to_public_key();
-
-    // Create TCP transport with secio message encryption
-    let transport = libp2p::tcp::TcpConfig::new()
-        .with_upgrade(secio::SecioConfig::new(local_key));
-
-    // Create a floodsub for CRDTs
-    let floodsub_topic = libp2p::floodsub::TopicBuilder::new("tmp").build();
-
-    /*
-    let mut behaviour = CustomBehaviour {
-            floodsub: libp2p::floodsub::Floodsub::new(local_pub_key.clone().into_peer_id()),
-            mdns: libp2p::mdns::Mdns::new().expect("Failed to create mDNS service"),
-    };
-
-    // Swarm is the libp2p state management structure
-    let mut swarm = libp2p::core::swarm::SwarmBuilder::new(
-        transport,
-        behaviour,
-        local_pub_key.clone().into_peer_id()).build();
-    */
+    basic_two_nodes_connectivity();
 }

@@ -13,3 +13,4 @@ futures = "0.1"
 names = "0.11"
 tokio = "0.1"
 rand = "0.6"
+substrate-network-libp2p = { git = "https://github.com/paritytech/substrate.git"}

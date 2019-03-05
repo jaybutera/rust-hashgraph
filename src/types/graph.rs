@@ -4,26 +4,53 @@ use crypto::digest::Digest;
 use std::collections::{HashMap,HashSet};
 
 use super::event::Event::{self,*};
-use super::RoundNum;
+use super::{Transaction, RoundNum};
 
 pub struct Graph {
     pub events: HashMap<String, Event>,
+    pub peer_id: String,
     creators: HashSet<String>,
     round_index: Vec<HashSet<String>>,
     is_famous: HashMap<String, bool>, // Some(false) means unfamous witness
+    latest_event: String,
+    round_of: HashMap<String, RoundNum>, // Just testing a caching system for now
 }
 
 impl Graph {
-    pub fn new() -> Self {
-        Graph {
+    pub fn new(peer_id: String) -> Self {
+        let genesis = Event::Genesis { creator: peer_id.clone() };
+
+        let mut g = Graph {
             events: HashMap::new(),
+            peer_id: peer_id,
             round_index: vec![HashSet::new()],
             creators: HashSet::new(),
             is_famous: HashMap::new(),
+            latest_event: genesis.hash(), // Gets reset in add_event
+            round_of: HashMap::new(),
+        };
+
+        g.add_event(genesis);
+        g
+    }
+
+    pub fn create_event(
+        &self,
+        other_parent: Option<String>, // Events can be reactionary or independent of an "other"
+        txs: Vec<Transaction>) -> Event
+    {
+        Event::Update {
+            creator: self.peer_id.clone(),
+            self_parent: self.events.get( &self.latest_event ).expect("Should always have a self parent from genesis").hash(),
+            other_parent: other_parent,
+            txs: txs,
         }
     }
 
     pub fn add_event(&mut self, event: Event) {
+        // TODO: Need to check that event self_parent and other_parent actually exist.
+        // Otherwise it will cause a panic on traversal
+
         let event_hash = event.hash();
         self.events.insert(event_hash.clone(), event);
 
@@ -35,9 +62,14 @@ impl Graph {
             };
         }
 
+        // Set this event as latest received
+        self.latest_event = event_hash.clone();
+
         //-- Set event's round
         let last_idx = self.round_index.len()-1;
         let r = self.determine_round(&event_hash);
+        // Cache result
+        self.round_of.insert(event_hash.clone(), r);
 
         if r > last_idx {
             // Create a new round
@@ -73,13 +105,19 @@ impl Graph {
     /// is a witness.
     pub fn determine_round(&self, event_hash: &String) -> RoundNum {
         let event = self.events.get(event_hash).unwrap();
+        if let Some(r) = self.round_of.get(event_hash) {
+            return *r
+        } else {
         match event {
             Event::Genesis{ .. } => 0,
-            Event::Update{ self_parent, other_parent, to, .. } => {
-                let r = std::cmp::max(
-                    self.determine_round(self_parent),
-                    self.determine_round(other_parent),
-                );
+            Event::Update{ self_parent, other_parent, .. } => {
+                let r = match other_parent {
+                    Some(op) => std::cmp::max(
+                        self.determine_round(self_parent),
+                        self.determine_round(op),
+                    ),
+                    None => self.determine_round(self_parent),
+                };
 
                 // Get events from round r
                 let round = self.round_index[r].iter()
@@ -107,12 +145,16 @@ impl Graph {
                 if witnesses_strongly_seen.len() > (2*n/3) { r+1 } else { r }
             },
         }
+        }
     }
 
     fn round_of(&self, event_hash: &String) -> RoundNum {
-        self.round_index.iter().enumerate()
-            .find(|(_,round)| round.contains(event_hash))
-            .expect("Failed to find a round for event").0
+        match self.round_of.get(event_hash) {
+            Some(r) => *r,
+            None => self.round_index.iter().enumerate()
+                        .find(|(_,round)| round.contains(event_hash))
+                        .expect("Failed to find a round for event").0
+        }
     }
 
     /// Determines if the event is a witness
@@ -129,34 +171,43 @@ impl Graph {
     fn is_famous(&self, event_hash: &String) -> bool {
         let event = self.events.get(event_hash).unwrap();
 
-        let witnesses = self.events.values()
-            .filter(|e| if let Some(_) = self.is_famous.get(&e.hash()) { true } else { false })
-            .fold(HashSet::new(), |mut set, e| {
-                if self.strongly_see(&e.hash(), event_hash) {
-                    let creator = match *e {
-                        Update{ ref creator, .. } => creator,
-                        Genesis{ ref creator } => creator,
-                    };
-                    set.insert(creator.clone());
-                }
-                set
-            });
+        match event {
+            Genesis{ .. } => true,
+            Update{ .. } => {
+                let witnesses = self.events.values()
+                    .filter(|e| if let Some(_) = self.is_famous.get(&e.hash()) { true } else { false })
+                    .fold(HashSet::new(), |mut set, e| {
+                        if self.strongly_see(&e.hash(), event_hash) {
+                            let creator = match *e {
+                                Update{ ref creator, .. } => creator,
+                                Genesis{ ref creator } => creator,
+                            };
+                            set.insert(creator.clone());
+                        }
+                        set
+                    });
 
-        let n = self.creators.len();
-        witnesses.len() > (2*n/3)
+                let n = self.creators.len();
+                witnesses.len() > (2*n/3)
+            },
+        }
     }
 
     fn ancestor(&self, x_hash: &String, y_hash: &String) -> bool {
         let x = self.events.get(x_hash).unwrap();
         let y = self.events.get(y_hash).unwrap();
 
-        match self.iter(x_hash).find(|e| e.hash() == *y_hash) {
+        let mut i = 0;
+        let t = match self.iter(x_hash).find(|e| {i += 1;e.hash() == *y_hash}) {
             Some(_) => true,
             None => false,
-        }
+        };
+        //println!("ancestor iterated {} times", i);
+        t
     }
 
     fn strongly_see(&self, x_hash: &String, y_hash: &String) -> bool {
+        let mut i =0;
         let mut creators_seen = self.iter(x_hash)
             .filter(|e| self.ancestor(&e.hash(),y_hash))
             .fold(HashSet::new(), |mut set, event| {
@@ -165,13 +216,15 @@ impl Graph {
                     Genesis{ ref creator } => creator,
                 };
                 set.insert(creator.clone());
+                i += 1;
                 set
             });
+        //println!("strongly_see loop iterated {} times",i);
 
-        // TODO: This uses "to" as temporary, ultimately just use the member id
+        // Add self to seen set incase it wasn't traversed above
         match self.events.get(x_hash).unwrap() {
             Genesis{ .. } => true,
-            Update{ to, .. } => creators_seen.insert(to.clone()),
+            Update{ .. } => creators_seen.insert(self.peer_id.clone()),
         };
 
         let n = self.creators.len();
@@ -193,6 +246,7 @@ impl<'a> EventIter<'a> {
             self.node_list.push(e);
 
             if let Update{ ref self_parent, .. } = *e {
+                //println!("push self_parent {}", self_parent.clone());
                 e = self.events.get(self_parent).unwrap();
             }
             else { break; }
@@ -210,7 +264,9 @@ impl<'a> Iterator for EventIter<'a> {
         };
 
         if let Update{ ref other_parent, .. } = *event {
-            self.push_self_parents(other_parent);
+            if let Some(ref e) = *other_parent {
+                self.push_self_parents(e);
+            }
         }
         Some(event)
     }
@@ -221,97 +277,85 @@ mod tests {
     use std::collections::HashMap;
     use super::*;
 
-    fn generate() -> (Graph, [String;10]) {
+    fn generate() -> ((Graph,Graph,Graph), [String;10]) {
         let c1 = "a".to_string();
         let c2 = "b".to_string();
         let c3 = "c".to_string();
-        let genesis1 = Event::Genesis{ creator:c1.clone() };
-        let genesis2 = Event::Genesis{ creator:c2.clone() };
-        let genesis3 = Event::Genesis{ creator:c3.clone() };
 
-        let e1 = Event::Update {
-            creator: c2.clone(),
-            self_parent: genesis1.hash(),
-            other_parent: genesis2.hash(),
-            txs: vec![],
-            to: c1.clone()
-        };
-        let e2 = Event::Update {
-            creator: c1.clone(), // TODO: Need to also consider the owner of a tx (whoever is running the program)
-            self_parent: genesis2.hash(),
-            other_parent: e1.hash(),
-            txs: vec![],
-            to: c2.clone()
-        };
-        let e3 = Event::Update {
-            creator: c2.clone(),
-            self_parent: genesis3.hash(),
-            other_parent: e2.hash(),
-            txs: vec![],
-            to: c3.clone()
-        };
-        let e4 = Event::Update {
-            creator: c3.clone(),
-            self_parent: e2.hash(),
-            other_parent: e3.hash(),
-            txs: vec![],
-            to: c2.clone()
-        };
-        let e5 = Event::Update {
-            creator: c2.clone(),
-            self_parent: e1.hash(),
-            other_parent: e4.hash(),
-            txs: vec![],
-            to: c1.clone()
-        };
-        let e6 = Event::Update {
-            creator: c1.clone(),
-            self_parent: e3.hash(),
-            other_parent: e5.hash(),
-            txs: vec![],
-            to: c3.clone()
-        };
-        let e7 = Event::Update {
-            creator: c3.clone(),
-            self_parent: e4.hash(),
-            other_parent: e6.hash(),
-            txs: vec![],
-            to: c2.clone()
-        };
+        let mut peer1 = Graph::new(c1);
+        let mut peer2 = Graph::new(c2);
+        let mut peer3 = Graph::new(c3);
 
-        let mut graph = Graph::new();
+        let g1_hash = peer1.events.get(&peer1.latest_event).unwrap().hash();
+        let g2_hash = peer2.events.get(&peer2.latest_event).unwrap().hash();
+        let g3_hash = peer3.events.get(&peer3.latest_event).unwrap().hash();
 
-        let g1_hash = genesis1.hash();
-        graph.add_event(genesis1);
+        // Share genesis events
+        peer1.add_event(peer2.events.get(&g2_hash).unwrap().clone());
+        peer1.add_event(peer3.events.get(&g3_hash).unwrap().clone());
+        peer2.add_event(peer3.events.get(&g3_hash).unwrap().clone());
+        peer2.add_event(peer1.events.get(&g1_hash).unwrap().clone());
+        peer3.add_event(peer1.events.get(&g1_hash).unwrap().clone());
+        peer3.add_event(peer2.events.get(&g2_hash).unwrap().clone());
 
-        let g2_hash = genesis2.hash();
-        graph.add_event(genesis2);
-
-        let g3_hash = genesis3.hash();
-        graph.add_event(genesis3);
-
+        // Peer1 receives an update from peer1, and creates an event for it
+        let e1 = peer1.create_event(
+            Some(g2_hash.clone()),
+            vec![]);
         let e1_hash = e1.hash();
-        graph.add_event(e1);
+        peer1.add_event(e1.clone());
+        peer2.add_event(e1.clone());
+        peer3.add_event(e1.clone());
 
+        let e2 = peer2.create_event(
+            Some(e1_hash.clone()),
+            vec![]);
         let e2_hash = e2.hash();
-        graph.add_event(e2);
+        peer1.add_event(e2.clone());
+        peer2.add_event(e2.clone());
+        peer3.add_event(e2.clone());
 
+        let e3 = peer3.create_event(
+            Some(e2_hash.clone()),
+            vec![]);
         let e3_hash = e3.hash();
-        graph.add_event(e3);
+        peer1.add_event(e3.clone());
+        peer2.add_event(e3.clone());
+        peer3.add_event(e3.clone());
 
+        let e4 = peer2.create_event(
+            Some(e3_hash.clone()),
+            vec![]);
         let e4_hash = e4.hash();
-        graph.add_event(e4);
+        peer1.add_event(e4.clone());
+        peer2.add_event(e4.clone());
+        peer3.add_event(e4.clone());
 
+        let e5 = peer1.create_event(
+            Some(e4_hash.clone()),
+            vec![]);
         let e5_hash = e5.hash();
-        graph.add_event(e5);
+        peer1.add_event(e5.clone());
+        peer2.add_event(e5.clone());
+        peer3.add_event(e5.clone());
 
+        let e6 = peer3.create_event(
+            Some(e5_hash.clone()),
+            vec![]);
         let e6_hash = e6.hash();
-        graph.add_event(e6);
+        peer1.add_event(e6.clone());
+        peer2.add_event(e6.clone());
+        peer3.add_event(e6.clone());
 
+        let e7 = peer2.create_event(
+            Some(e6_hash.clone()),
+            vec![]);
         let e7_hash = e7.hash();
-        graph.add_event(e7);
+        peer1.add_event(e7.clone());
+        peer2.add_event(e7.clone());
+        peer3.add_event(e7.clone());
 
-        (graph, [g1_hash, g2_hash, g3_hash, e1_hash, e2_hash, e3_hash, e4_hash, e5_hash, e6_hash, e7_hash])
+        ((peer1, peer2, peer3), [g1_hash, g2_hash, g3_hash, e1_hash, e2_hash, e3_hash, e4_hash, e5_hash, e6_hash, e7_hash])
     }
 
     #[test]
@@ -320,7 +364,7 @@ mod tests {
 
         assert_eq!(
             true,
-            graph.ancestor(
+            graph.0.ancestor(
                 &event_hashes[3],
                 &event_hashes[0]))
     }
@@ -331,7 +375,7 @@ mod tests {
 
         assert_eq!(
             true,
-            graph.strongly_see(
+            graph.0.strongly_see(
                 &event_hashes[6],
                 &event_hashes[0]))
     }
@@ -341,9 +385,12 @@ mod tests {
         let (graph, event_hashes) = generate();
 
         for eh in &event_hashes {
+                println!("event {} in round {}", eh.clone(), graph.0.determine_round(eh));
+        }
+        for eh in &event_hashes {
             assert_eq!(
                 true,
-                graph.round_index[graph.determine_round(eh)].contains(eh));
+                graph.0.round_index[graph.0.determine_round(eh)].contains(eh));
         }
     }
 
@@ -353,13 +400,13 @@ mod tests {
 
         assert_eq!(
             false,
-            graph.determine_witness(&event_hashes[6]));
+            graph.0.determine_witness(&event_hashes[6]));
         assert_eq!(
             true,
-            graph.determine_witness(&event_hashes[7]));
+            graph.0.determine_witness(&event_hashes[7]));
         assert_eq!(
             true,
-            graph.determine_witness(&event_hashes[8]));
+            graph.0.determine_witness(&event_hashes[8]));
     }
 
     #[test]
@@ -368,6 +415,9 @@ mod tests {
 
         assert_eq!(
             true,
-            graph.is_famous(&event_hashes[0]))
+            graph.0.is_famous(&event_hashes[0]));
+        assert_eq!(
+            false,
+            graph.0.is_famous(&event_hashes[3]));
     }
 }
