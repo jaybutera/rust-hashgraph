@@ -37,9 +37,11 @@ impl Graph {
     pub fn create_event(
         &self,
         other_parent: Option<String>, // Events can be reactionary or independent of an "other"
+        _to: String,
         txs: Vec<Transaction>) -> Event
     {
         Event::Update {
+            to: _to,
             creator: self.peer_id.clone(),
             self_parent: self.events.get( &self.latest_event ).expect("Should always have a self parent from genesis").hash(),
             other_parent: other_parent,
@@ -58,12 +60,15 @@ impl Graph {
             let event = self.events.get(&event_hash).unwrap();
             match event {
                 Genesis{ creator, .. } => self.creators.insert(creator.clone()),
-                Update { creator, .. } => self.creators.insert(creator.clone()),
+                Update { creator, to, .. } => {
+                    // Set this event as latest received
+                    if *to == self.peer_id {
+                        self.latest_event = event_hash.clone();
+                    }
+                    self.creators.insert(creator.clone())
+                },
             };
         }
-
-        // Set this event as latest received
-        self.latest_event = event_hash.clone();
 
         //-- Set event's round
         let last_idx = self.round_index.len()-1;
@@ -105,12 +110,12 @@ impl Graph {
     /// is a witness.
     pub fn determine_round(&self, event_hash: &String) -> RoundNum {
         let event = self.events.get(event_hash).unwrap();
-        if let Some(r) = self.round_of.get(event_hash) {
-            return *r
-        } else {
         match event {
             Event::Genesis{ .. } => 0,
             Event::Update{ self_parent, other_parent, .. } => {
+                if let Some(r) = self.round_of.get(event_hash) {
+                    return *r
+                } else {
                 let r = match other_parent {
                     Some(op) => std::cmp::max(
                         self.determine_round(self_parent),
@@ -143,8 +148,8 @@ impl Graph {
                 let n = self.creators.len();
 
                 if witnesses_strongly_seen.len() > (2*n/3) { r+1 } else { r }
+                }
             },
-        }
         }
     }
 
@@ -301,6 +306,7 @@ mod tests {
         // Peer1 receives an update from peer1, and creates an event for it
         let e1 = peer1.create_event(
             Some(g2_hash.clone()),
+            peer2.peer_id.clone(),
             vec![]);
         let e1_hash = e1.hash();
         peer1.add_event(e1.clone());
@@ -309,6 +315,7 @@ mod tests {
 
         let e2 = peer2.create_event(
             Some(e1_hash.clone()),
+            peer3.peer_id.clone(),
             vec![]);
         let e2_hash = e2.hash();
         peer1.add_event(e2.clone());
@@ -317,6 +324,7 @@ mod tests {
 
         let e3 = peer3.create_event(
             Some(e2_hash.clone()),
+            peer2.peer_id.clone(),
             vec![]);
         let e3_hash = e3.hash();
         peer1.add_event(e3.clone());
@@ -325,6 +333,7 @@ mod tests {
 
         let e4 = peer2.create_event(
             Some(e3_hash.clone()),
+            peer1.peer_id.clone(),
             vec![]);
         let e4_hash = e4.hash();
         peer1.add_event(e4.clone());
@@ -333,6 +342,7 @@ mod tests {
 
         let e5 = peer1.create_event(
             Some(e4_hash.clone()),
+            peer3.peer_id.clone(),
             vec![]);
         let e5_hash = e5.hash();
         peer1.add_event(e5.clone());
@@ -341,6 +351,7 @@ mod tests {
 
         let e6 = peer3.create_event(
             Some(e5_hash.clone()),
+            peer2.peer_id.clone(),
             vec![]);
         let e6_hash = e6.hash();
         peer1.add_event(e6.clone());
@@ -349,6 +360,7 @@ mod tests {
 
         let e7 = peer2.create_event(
             Some(e6_hash.clone()),
+            peer1.peer_id.clone(), // Outgoing doesn't matter
             vec![]);
         let e7_hash = e7.hash();
         peer1.add_event(e7.clone());

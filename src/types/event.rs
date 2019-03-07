@@ -10,7 +10,7 @@ pub enum Event {
         self_parent: String,
         other_parent: Option<String>,
         txs: Vec<Transaction>,
-        //to: String, // TODO: Temporary info just for simulation of multiple machines in one program
+        to: String, // TODO: Temporary info just for simulation of multiple machines in one program
     },
     Genesis{creator: String},
 }
