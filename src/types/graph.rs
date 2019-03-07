@@ -62,7 +62,7 @@ impl Graph {
                 Genesis{ creator, .. } => self.creators.insert(creator.clone()),
                 Update { creator, to, .. } => {
                     // Set this event as latest received
-                    if *to == self.peer_id {
+                    if *creator == self.peer_id {
                         self.latest_event = event_hash.clone();
                     }
                     self.creators.insert(creator.clone())
@@ -113,6 +113,7 @@ impl Graph {
         match event {
             Event::Genesis{ .. } => 0,
             Event::Update{ self_parent, other_parent, .. } => {
+                // Check if it is cached
                 if let Some(r) = self.round_of.get(event_hash) {
                     return *r
                 } else {
@@ -130,7 +131,7 @@ impl Graph {
                     .map(|e_hash| self.events.get(e_hash).unwrap())
                     .collect::<Vec<_>>();
 
-                // Find out how many witnesses by unique members strongly see the event
+                // Find out how many witnesses by unique members the event can strongly see
                 let witnesses_strongly_seen = round.iter()
                     .filter(|e| if let Some(_) = self.is_famous.get(&e.hash()) { true } else { false })
                     .fold(HashSet::new(), |mut set, e| {
@@ -179,6 +180,11 @@ impl Graph {
         match event {
             Genesis{ .. } => true,
             Update{ .. } => {
+                // Event must be a witness
+                if !self.determine_witness(event_hash) {
+                    return false
+                }
+
                 let witnesses = self.events.values()
                     .filter(|e| if let Some(_) = self.is_famous.get(&e.hash()) { true } else { false })
                     .fold(HashSet::new(), |mut set, e| {
@@ -202,17 +208,13 @@ impl Graph {
         let x = self.events.get(x_hash).unwrap();
         let y = self.events.get(y_hash).unwrap();
 
-        let mut i = 0;
-        let t = match self.iter(x_hash).find(|e| {i += 1;e.hash() == *y_hash}) {
+        match self.iter(x_hash).find(|e| e.hash() == *y_hash) {
             Some(_) => true,
             None => false,
-        };
-        //println!("ancestor iterated {} times", i);
-        t
+        }
     }
 
     fn strongly_see(&self, x_hash: &String, y_hash: &String) -> bool {
-        let mut i =0;
         let mut creators_seen = self.iter(x_hash)
             .filter(|e| self.ancestor(&e.hash(),y_hash))
             .fold(HashSet::new(), |mut set, event| {
@@ -221,10 +223,8 @@ impl Graph {
                     Genesis{ ref creator } => creator,
                 };
                 set.insert(creator.clone());
-                i += 1;
                 set
             });
-        //println!("strongly_see loop iterated {} times",i);
 
         // Add self to seen set incase it wasn't traversed above
         match self.events.get(x_hash).unwrap() {
@@ -251,7 +251,6 @@ impl<'a> EventIter<'a> {
             self.node_list.push(e);
 
             if let Update{ ref self_parent, .. } = *e {
-                //println!("push self_parent {}", self_parent.clone());
                 e = self.events.get(self_parent).unwrap();
             }
             else { break; }
@@ -283,6 +282,18 @@ mod tests {
     use super::*;
 
     fn generate() -> ((Graph,Graph,Graph), [String;10]) {
+        /* Generates the following graph for each member (c1,c2,c3)
+         *
+            |  o__|  -- e7
+            |__|__o  -- e6
+            o__|  |  -- e5
+            |  o__|  -- e4
+            |  |__o  -- e3
+            |__o  |  -- e2
+            o__|  |  -- e1
+            o  o  o  -- (g1,g2,g3)
+        */
+
         let c1 = "a".to_string();
         let c2 = "b".to_string();
         let c3 = "c".to_string();
@@ -386,24 +397,29 @@ mod tests {
         let (graph, event_hashes) = generate();
 
         assert_eq!(
+            false,
+            graph.0.strongly_see(
+                &event_hashes[4],
+                &event_hashes[0]));
+        assert_eq!(
             true,
             graph.0.strongly_see(
                 &event_hashes[6],
-                &event_hashes[0]))
+                &event_hashes[0]));
     }
 
     #[test]
     fn test_determine_round() {
         let (graph, event_hashes) = generate();
 
-        for eh in &event_hashes {
-                println!("event {} in round {}", eh.clone(), graph.0.determine_round(eh));
-        }
-        for eh in &event_hashes {
-            assert_eq!(
-                true,
-                graph.0.round_index[graph.0.determine_round(eh)].contains(eh));
-        }
+        assert_eq!(
+            true,
+            graph.0.round_index[0].contains(&event_hashes[5])
+            );
+        assert_eq!(
+            true,
+            graph.0.round_index[1].contains(&event_hashes[6])
+            );
     }
 
     #[test]
@@ -412,13 +428,13 @@ mod tests {
 
         assert_eq!(
             false,
+            graph.0.determine_witness(&event_hashes[5]));
+        assert_eq!(
+            true,
             graph.0.determine_witness(&event_hashes[6]));
         assert_eq!(
             true,
             graph.0.determine_witness(&event_hashes[7]));
-        assert_eq!(
-            true,
-            graph.0.determine_witness(&event_hashes[8]));
     }
 
     #[test]
