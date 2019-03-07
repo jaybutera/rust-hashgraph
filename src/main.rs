@@ -67,4 +67,19 @@ fn basic_two_nodes_connectivity() {
 
 fn main() {
     basic_two_nodes_connectivity();
+
+    /*
+    let mut service =  build_nodes::<Vec<u8>>(2).into_iter().next().unwrap();
+
+    let fut = future::poll_fn(move || -> io::Result<_> {
+        loop {
+            match try_ready!(service.poll()) {
+                Some(ServiceEvent::OpenedCustomProtocol { node_index, protocol, .. }) => {},
+                Some(ServiceEvent::CustomMessage { message, .. }) => {
+                },
+                _ => panic!(),
+            }
+        }
+    });
+    */
 }

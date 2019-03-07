@@ -60,7 +60,7 @@ impl Graph {
             let event = self.events.get(&event_hash).unwrap();
             match event {
                 Genesis{ creator, .. } => self.creators.insert(creator.clone()),
-                Update { creator, to, .. } => {
+                Update { creator, .. } => {
                     // Set this event as latest received
                     if *creator == self.peer_id {
                         self.latest_event = event_hash.clone();
