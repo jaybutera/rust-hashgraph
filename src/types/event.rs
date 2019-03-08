@@ -1,16 +1,16 @@
-use serde::Serialize;
+use serde::{Serialize,Deserialize};
 use crypto::sha3::Sha3;
 use crypto::digest::Digest;
 use super::Transaction;
 
-#[derive(Serialize, Clone)] // Clone is temporary for graph unit tests
+#[derive(Serialize, Deserialize, Clone)] // Clone is temporary for graph unit tests
 pub enum Event {
     Update {
         creator: String, // TODO: Change to a signature
         self_parent: String,
         other_parent: Option<String>,
         txs: Vec<Transaction>,
-        to: String, // TODO: Temporary info just for simulation of multiple machines in one program
+        to: String,
     },
     Genesis{creator: String},
 }

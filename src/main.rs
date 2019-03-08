@@ -3,7 +3,10 @@ use libp2p::core::transport::Transport;
 use substrate_network_libp2p::{CustomMessage, Protocol, ServiceEvent, build_multiaddr};
 use futures::{future, stream, prelude::*, try_ready};
 use rand::seq::SliceRandom;
-use std::{io, iter};
+use std::{io, str, iter};
+use std::collections::HashMap;
+
+mod types;
 
 fn build_nodes<TMsg>(num: usize) -> Vec<substrate_network_libp2p::Service<TMsg>>
 	where TMsg: CustomMessage + Send + 'static
@@ -66,20 +69,28 @@ fn basic_two_nodes_connectivity() {
 }
 
 fn main() {
-    basic_two_nodes_connectivity();
+    //basic_two_nodes_connectivity();
 
-    /*
-    let mut service =  build_nodes::<Vec<u8>>(2).into_iter().next().unwrap();
+    let mut service =  build_nodes::<Vec<u8>>(1).into_iter().next().unwrap();
+    let mut graph = types::graph::Graph::new(service.state().peer_id);
 
     let fut = future::poll_fn(move || -> io::Result<_> {
         loop {
             match try_ready!(service.poll()) {
-                Some(ServiceEvent::OpenedCustomProtocol { node_index, protocol, .. }) => {},
+                Some(ServiceEvent::OpenedCustomProtocol { node_index, .. }) => {
+                    println!("Connected to node w/ index {}", node_index);
+                },
                 Some(ServiceEvent::CustomMessage { message, .. }) => {
+                    let e: types::event::Event = serde_json::from_str(String::from_utf8(message).unwrap().as_str())
+                        .expect("Invalid json in message");
+                    graph.add_event(e);
                 },
                 _ => panic!(),
             }
         }
+
+        Ok(Async::Ready(()))
     });
-    */
+
+    tokio::runtime::Runtime::new().unwrap().block_on(fut).unwrap();
 }

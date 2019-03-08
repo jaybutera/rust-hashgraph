@@ -51,9 +51,16 @@ impl Graph {
 
     pub fn add_event(&mut self, event: Event) -> Result<(),()> {
         // Only accept an event with a valid self_parent and other_parent
-        if self.events.get(&events.self_parent) == None ||
-           self.events.get(&events.other_parent) == None {
-            return Err(())
+        // TODO: Make this prettier
+        if let Update{ ref self_parent, ref other_parent, .. } = event {
+            if self.events.get(self_parent).is_none() {
+                return Err(())
+            }
+            if let Some(ref op) = other_parent {
+                if self.events.get(op).is_none() {
+                    return Err(())
+                }
+            }
         }
 
         let event_hash = event.hash();
