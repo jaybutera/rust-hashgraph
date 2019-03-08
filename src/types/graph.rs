@@ -49,9 +49,12 @@ impl Graph {
         }
     }
 
-    pub fn add_event(&mut self, event: Event) {
-        // TODO: Need to check that event self_parent and other_parent actually exist.
-        // Otherwise it will cause a panic on traversal
+    pub fn add_event(&mut self, event: Event) -> Result<(),()> {
+        // Only accept an event with a valid self_parent and other_parent
+        if self.events.get(&events.self_parent) == None ||
+           self.events.get(&events.other_parent) == None {
+            return Err(())
+        }
 
         let event_hash = event.hash();
         self.events.insert(event_hash.clone(), event);
@@ -92,6 +95,8 @@ impl Graph {
         if self.determine_witness(&event_hash) {
             self.is_famous.insert(event_hash, false);
         }
+
+        Ok(())
     }
 
     pub fn iter(&self, event_hash: &String) -> EventIter {
