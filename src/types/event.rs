@@ -10,7 +10,6 @@ pub enum Event {
         self_parent: String,
         other_parent: Option<String>,
         txs: Vec<Transaction>,
-        to: String,
     },
     Genesis{creator: String},
 }

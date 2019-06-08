@@ -41,7 +41,6 @@ impl Graph {
         txs: Vec<Transaction>) -> Event
     {
         Event::Update {
-            to: _to,
             creator: self.peer_id.clone(),
             self_parent: self.events.get( &self.latest_event ).expect("Should always have a self parent from genesis").hash(),
             other_parent: other_parent,
