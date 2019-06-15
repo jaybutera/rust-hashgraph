@@ -8,13 +8,20 @@ use super::event::Event::{self,*};
 use super::{Transaction, RoundNum};
 
 #[wasm_bindgen]
+#[derive(Serialize)]
 pub struct Graph {
     events: HashMap<String, Event>,
+    #[serde(skip)]
     peer_id: String,
+    #[serde(skip)]
     creators: HashSet<String>,
+    #[serde(skip)]
     round_index: Vec<HashSet<String>>,
+    #[serde(skip)]
     is_famous: HashMap<String, bool>, // Some(false) means unfamous witness
+    #[serde(skip)]
     latest_event: String,
+    #[serde(skip)]
     round_of: HashMap<String, RoundNum>, // Just testing a caching system for now
 }
 
@@ -47,6 +54,11 @@ impl Graph {
         let txs = vec![];
         let event = self.create_event(other_parent, txs);
         self.add_event(event).is_ok()
+    }
+
+    pub fn get_graph(&self) -> JsValue {
+        let self_str = serde_json::to_string(self).expect("Graph should always be serializable");
+        wasm_bindgen::JsValue::from(self_str)
     }
 }
 
