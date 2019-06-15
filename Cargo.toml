@@ -4,13 +4,17 @@ version = "0.1.0"
 authors = ["Jay Butera <buterajay@gmail.com>"]
 edition = "2018"
 
+[lib]
+crate-type = ["cdylib"]
+
 [dependencies]
-rust-crypto = "0.2.36"
+wasm-bindgen = "0.2"
+rust-crypto-wasm = "0.3"
 serde = { version = "1.0", features = ["derive"] }
-libp2p = "0.4"
+#libp2p = "0.4"
 serde_json = "1.0"
-futures = "0.1"
-names = "0.11"
-tokio = "0.1"
-rand = "0.6"
-substrate-network-libp2p = { git = "https://github.com/paritytech/substrate.git"}
+#futures = "0.1"
+#names = "0.11"
+#tokio = "0.1"
+#rand = "0.6"
+#substrate-network-libp2p = { git = "https://github.com/paritytech/substrate.git"}

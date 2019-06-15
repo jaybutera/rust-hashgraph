@@ -2,13 +2,15 @@ use serde::Serialize;
 use crypto::sha3::Sha3;
 use crypto::digest::Digest;
 use std::collections::{HashMap,HashSet};
+use wasm_bindgen::prelude::*;
 
 use super::event::Event::{self,*};
 use super::{Transaction, RoundNum};
 
+#[wasm_bindgen]
 pub struct Graph {
-    pub events: HashMap<String, Event>,
-    pub peer_id: String,
+    events: HashMap<String, Event>,
+    peer_id: String,
     creators: HashSet<String>,
     round_index: Vec<HashSet<String>>,
     is_famous: HashMap<String, bool>, // Some(false) means unfamous witness
@@ -16,6 +18,7 @@ pub struct Graph {
     round_of: HashMap<String, RoundNum>, // Just testing a caching system for now
 }
 
+#[wasm_bindgen]
 impl Graph {
     pub fn new(peer_id: String) -> Self {
         let genesis = Event::Genesis { creator: peer_id.clone() };
@@ -34,10 +37,23 @@ impl Graph {
         g
     }
 
+    pub fn add(
+        &mut self,
+        other_parent: Option<String>, // Events can be reactionary or independent of an "other"
+        js_txs: Box<[JsValue]>) -> bool
+    {
+        //let txs: Vec<Transaction> = Vec::from(js_txs);
+        // TODO: This is complicated so ignoring txs for now
+        let txs = vec![];
+        let event = self.create_event(other_parent, txs);
+        self.add_event(event).is_ok()
+    }
+}
+
+impl Graph {
     pub fn create_event(
         &self,
         other_parent: Option<String>, // Events can be reactionary or independent of an "other"
-        _to: String,
         txs: Vec<Transaction>) -> Event
     {
         Event::Update {
