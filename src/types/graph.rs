@@ -47,13 +47,16 @@ impl Graph {
     pub fn add(
         &mut self,
         other_parent: Option<String>, // Events can be reactionary or independent of an "other"
-        js_txs: Box<[JsValue]>) -> bool
+        js_txs: Box<[JsValue]>) -> Option<String>
     {
         //let txs: Vec<Transaction> = Vec::from(js_txs);
         // TODO: This is complicated so ignoring txs for now
         let txs = vec![];
         let event = self.create_event(other_parent, txs);
-        self.add_event(event).is_ok()
+
+        let hash = event.hash();
+        if self.add_event(event).is_ok() { Some(hash) }
+        else { None }
     }
 
     pub fn get_graph(&self) -> JsValue {
