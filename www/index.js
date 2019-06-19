@@ -5,31 +5,30 @@ let creators = {}
   , nodes = []
   , links = [];
 
-
 document.getElementById('addEvent').addEventListener('click', () => add_event(null, 'yo_id'));
 
 let drag = simulation => {
-  function dragstarted(d) {
-    if (!d3.event.active) simulation.alphaTarget(0.3).restart();
-    d.fx = d.x;
-    d.fy = d.y;
-  }
+    function dragstarted(d) {
+        if (!d3.event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
+    }
 
-  function dragged(d) {
-    d.fx = d3.event.x;
-    d.fy = d3.event.y;
-  }
+    function dragged(d) {
+        d.fx = d3.event.x;
+        d.fy = d3.event.y;
+    }
 
-  function dragended(d) {
-    if (!d3.event.active) simulation.alphaTarget(0);
-    d.fx = null;
-    d.fy = null;
-  }
+    function dragended(d) {
+        if (!d3.event.active) simulation.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
+    }
 
-  return d3.drag()
-      .on("start", dragstarted)
-      .on("drag", dragged)
-      .on("end", dragended);
+    return d3.drag()
+        .on("start", dragstarted)
+        .on("drag", dragged)
+        .on("end", dragended);
 }
 
 const svg = d3.select("body")
@@ -82,8 +81,6 @@ sim.on("tick", () => {
         .attr("cy", d => d.y);
 });
 
-let g = new_graph('yo_id');
-
 function new_graph(creator_id) {
     let g = wasm.Graph.new(creator_id);
     // Store in creators dict
@@ -102,9 +99,7 @@ function new_graph(creator_id) {
 function add_event(other_parent, creator_id) {
     let g = creators[creator_id];
     let h = g.add(other_parent, []);
-    let e = Object.values(JSON.parse( g.get_event(h) ))[0];
-    console.log("event: " + g.get_event(h));
-    console.log(e.self_parent)
+    let self_parent = Object.values(JSON.parse( g.get_event(h) ))[0].self_parent;
 
     // Update d3
     if (h) {
@@ -113,7 +108,7 @@ function add_event(other_parent, creator_id) {
             hash: h
         }));
         links.push({
-            source: e.self_parent,
+            source: self_parent,
             target: h
         });
         if (other_parent) {
@@ -123,11 +118,6 @@ function add_event(other_parent, creator_id) {
             });
         }
     }
-    svg
-        .selectAll("circle")
-        .data(nodes)
-        .enter()
-        .join("circle");
 
     restart();
 
@@ -155,3 +145,7 @@ function restart() {
   sim.force("link").links(links);
   sim.alpha(1).restart();
 }
+
+// Start a graph
+let creator = 'yo_id'
+let g = new_graph(creator);
