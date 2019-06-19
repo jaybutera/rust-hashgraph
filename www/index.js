@@ -6,95 +6,7 @@ let creators = {}
   , links = [];
 
 
-let g = new_graph('yo_id');
-console.log("Adding an event to the graph: " + add_event(null, 'yo_id'));//g.add(null, []));
-console.log("Adding this event should fail: " + !g.add("test", []));
-
-//const json_events = Object.entries(JSON.parse(g.get_graph()).events);
-
-function new_graph(creator_id) {
-    creators[creator_id] = wasm.Graph.new(creator_id);
-    return creators[creator_id];
-}
-
-function add_event(other_parent, creator_id) {
-    let g = creators[creator_id];
-    return g.add(other_parent, []); // Returns new event hash (or null on failure)
-}
-
 document.getElementById('addEvent').addEventListener('click', () => add_event(null, 'yo_id'));
-
-function add_event(other_parent, creator_id) {
-    let g = creators[creator_id];
-    //let op = null;
-    //let h = add_event(op, 'yo_id');
-    let e = Object.values(JSON.parse( g.get_event(h) ))[0];
-    console.log("event: " + g.get_event(h));
-    console.log(e.self_parent)
-
-    // Update d3
-    if (h) {
-        nodes.push( Object.create({
-            creator: 'yo_id',
-            hash: h
-        }));
-        links.push({
-            source: e.self_parent,
-            target: h
-        });
-        if (op) {
-            links.push({
-                source: op,
-                target: h
-            });
-        }
-    }
-    node.data(nodes).enter().merge();
-    link.data(links).enter().merge();
-
-    console.log("NODES");
-    console.log(nodes);
-    console.log("LINKS");
-    console.log(links);
-});
-
-/*
-let nodes = json_events.map(e => Object.create({
-    creator: Object.values(e[1])[0].creator,
-    hash: e[0]
-}));
-
-let links = flatten(json_events.map(e => {
-    const hash = e[0];
-    const info = Object.values(e[1])[0]; // Get event regardless of Genesis or Update
-
-    if ("self_parent" in info) {
-        let links = [{
-            source: info.self_parent,
-            target: hash,
-        }];
-
-        if ("other_parent" in info && info.other_parent != null)
-            links.push( {
-                source: info.other_parent,
-                target: hash,
-            });
-
-        return links;
-    }
-
-    return null;
-}).filter(x => x != null));
-
-console.log("NODES");
-console.log(nodes);
-console.log("LINKS");
-console.log(links);
-
-function flatten(arr) {
-    return [].concat(...arr)
-}
-*/
 
 let drag = simulation => {
   function dragstarted(d) {
@@ -126,7 +38,8 @@ const svg = d3.select("body")
     .attr('height', 200);
 
 const width = svg.attr('width'),
-      height = svg.attr('height');
+      height = svg.attr('height'),
+      color = d3.scaleOrdinal(d3.schemeCategory10);
 
 const sim = d3.forceSimulation()
     .nodes(nodes)
@@ -134,7 +47,7 @@ const sim = d3.forceSimulation()
     .force('charge', d3.forceManyBody())
     .force('center', d3.forceCenter(width/2, height/2));
 
-const link = svg.append("g")
+let link = svg.append("g")
     .attr("stroke", "#999")
     .attr("stroke-opacity", 0.6)
     .selectAll("line")
@@ -142,7 +55,7 @@ const link = svg.append("g")
     .join("line")
     .attr("stroke-width", d => Math.sqrt(d.value));
 
-const node = svg.append("g")
+let node = svg.append("g")
     .attr("stroke", "#fff")
     .attr("stroke-width", 1.5)
     .selectAll("circle")
@@ -168,3 +81,77 @@ sim.on("tick", () => {
         .attr("cx", d => d.x)
         .attr("cy", d => d.y);
 });
+
+let g = new_graph('yo_id');
+
+function new_graph(creator_id) {
+    let g = wasm.Graph.new(creator_id);
+    // Store in creators dict
+    creators[creator_id] = g;
+
+    const genesis_hash = Object.entries(JSON.parse(g.get_graph()).events)[0][0];
+    nodes.push( Object.create({
+        creator: 'yo_id',
+        hash: genesis_hash
+    }));
+
+    restart();
+    return creators[creator_id];
+}
+
+function add_event(other_parent, creator_id) {
+    let g = creators[creator_id];
+    let h = g.add(other_parent, []);
+    let e = Object.values(JSON.parse( g.get_event(h) ))[0];
+    console.log("event: " + g.get_event(h));
+    console.log(e.self_parent)
+
+    // Update d3
+    if (h) {
+        nodes.push( Object.create({
+            creator: 'yo_id',
+            hash: h
+        }));
+        links.push({
+            source: e.self_parent,
+            target: h
+        });
+        if (other_parent) {
+            links.push({
+                source: other_parent,
+                target: h
+            });
+        }
+    }
+    svg
+        .selectAll("circle")
+        .data(nodes)
+        .enter()
+        .join("circle");
+
+    restart();
+
+    console.log("NODES");
+    console.log(nodes);
+    console.log("LINKS");
+    console.log(links);
+
+    return h;
+};
+
+function restart() {
+  // Apply the general update pattern to the nodes.
+  node = node.data(nodes, function(d) { return d.hash;});
+  node.exit().remove();
+  node = node.enter().append("circle").attr("fill", function(d) { return color(d.hash); }).attr("r", 8).merge(node);
+
+  // Apply the general update pattern to the links.
+  link = link.data(links, function(d) { return d.source.hash + "-" + d.target.id; });
+  link.exit().remove();
+  link = link.enter().append("line").merge(link);
+
+  // Update and restart the simulation.
+  sim.nodes(nodes);
+  sim.force("link").links(links);
+  sim.alpha(1).restart();
+}
