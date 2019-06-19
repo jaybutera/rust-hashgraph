@@ -5,7 +5,13 @@ let creators = {}
   , nodes = []
   , links = [];
 
-document.getElementById('addEvent').addEventListener('click', () => add_event(null, 'yo_id'));
+document.getElementById('addEvent').addEventListener('click', () => {
+    let other_parent = document.getElementById('inp_hash').value;
+    console.log(other_parent);
+
+    if (!other_parent) other_parent = null;
+    add_event(other_parent, 'yo_id')
+});
 
 let drag = simulation => {
     function dragstarted(d) {
@@ -93,6 +99,7 @@ function new_graph(creator_id) {
     }));
 
     restart();
+    display_hash(genesis_hash);
     return creators[creator_id];
 }
 
@@ -117,9 +124,11 @@ function add_event(other_parent, creator_id) {
                 target: h
             });
         }
+
+        restart();
+        display_hash(h);
     }
 
-    restart();
 
     console.log("NODES");
     console.log(nodes);
@@ -128,6 +137,13 @@ function add_event(other_parent, creator_id) {
 
     return h;
 };
+
+function display_hash(hash) {
+    let p = document.createElement('p');
+    p.innerText = hash;
+    document.getElementById('hashes')
+            .appendChild(p);
+}
 
 function restart() {
   // Apply the general update pattern to the nodes.
