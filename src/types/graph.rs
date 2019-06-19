@@ -63,6 +63,11 @@ impl Graph {
         let self_str = serde_json::to_string(self).expect("Graph should always be serializable");
         wasm_bindgen::JsValue::from(self_str)
     }
+
+    pub fn get_event(&self, hash: String) -> Option<String> {
+        self.events.get(&hash)
+            .map(|event| serde_json::to_string(event).expect("Event should be serializable"))
+    }
 }
 
 impl Graph {

@@ -1,11 +1,64 @@
 import * as wasm from "rust-hashgraph";
 
-let g = wasm.Graph.new("yo_id");
-console.log("Adding an event to the graph: " + g.add(null, []));
+// Globals
+let creators = {}
+  , nodes = []
+  , links = [];
+
+
+let g = new_graph('yo_id');
+console.log("Adding an event to the graph: " + add_event(null, 'yo_id'));//g.add(null, []));
 console.log("Adding this event should fail: " + !g.add("test", []));
 
-const json_events = Object.entries(JSON.parse(g.get_graph()).events);
+//const json_events = Object.entries(JSON.parse(g.get_graph()).events);
 
+function new_graph(creator_id) {
+    creators[creator_id] = wasm.Graph.new(creator_id);
+    return creators[creator_id];
+}
+
+function add_event(other_parent, creator_id) {
+    let g = creators[creator_id];
+    return g.add(other_parent, []); // Returns new event hash (or null on failure)
+}
+
+document.getElementById('addEvent').addEventListener('click', () => add_event(null, 'yo_id'));
+
+function add_event(other_parent, creator_id) {
+    let g = creators[creator_id];
+    //let op = null;
+    //let h = add_event(op, 'yo_id');
+    let e = Object.values(JSON.parse( g.get_event(h) ))[0];
+    console.log("event: " + g.get_event(h));
+    console.log(e.self_parent)
+
+    // Update d3
+    if (h) {
+        nodes.push( Object.create({
+            creator: 'yo_id',
+            hash: h
+        }));
+        links.push({
+            source: e.self_parent,
+            target: h
+        });
+        if (op) {
+            links.push({
+                source: op,
+                target: h
+            });
+        }
+    }
+    node.data(nodes).enter().merge();
+    link.data(links).enter().merge();
+
+    console.log("NODES");
+    console.log(nodes);
+    console.log("LINKS");
+    console.log(links);
+});
+
+/*
 let nodes = json_events.map(e => Object.create({
     creator: Object.values(e[1])[0].creator,
     hash: e[0]
@@ -19,14 +72,12 @@ let links = flatten(json_events.map(e => {
         let links = [{
             source: info.self_parent,
             target: hash,
-            value: 1
         }];
 
         if ("other_parent" in info && info.other_parent != null)
             links.push( {
                 source: info.other_parent,
                 target: hash,
-                value: 1
             });
 
         return links;
@@ -43,6 +94,7 @@ console.log(links);
 function flatten(arr) {
     return [].concat(...arr)
 }
+*/
 
 let drag = simulation => {
   function dragstarted(d) {
