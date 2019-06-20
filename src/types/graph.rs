@@ -155,7 +155,7 @@ impl Graph {
 
     /// Determine the round an event belongs to, which is the max of its parents' rounds +1 if it
     /// is a witness.
-    pub fn determine_round(&self, event_hash: &String) -> RoundNum {
+    fn determine_round(&self, event_hash: &String) -> RoundNum {
         let event = self.events.get(event_hash).unwrap();
         match event {
             Event::Genesis{ .. } => 0,
