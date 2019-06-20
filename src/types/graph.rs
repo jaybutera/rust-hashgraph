@@ -134,7 +134,7 @@ impl Graph {
         //--
 
         // Set witness status
-        if self.determine_witness(&event_hash) {
+        if self.determine_witness(event_hash.clone()) {
             self.is_famous.insert(event_hash, false);
         }
 
@@ -182,7 +182,7 @@ impl Graph {
                 let witnesses_strongly_seen = round.iter()
                     .filter(|e| if let Some(_) = self.is_famous.get(&e.hash()) { true } else { false })
                     .fold(HashSet::new(), |mut set, e| {
-                        if self.strongly_see(event_hash, &e.hash()) {
+                        if self.strongly_see(event_hash.clone(), e.hash()) {
                             let creator = match *e {
                                 Update{ ref creator, .. } => creator,
                                 Genesis{ ref creator } => creator,
@@ -200,42 +200,45 @@ impl Graph {
             },
         }
     }
+}
 
-    fn round_of(&self, event_hash: &String) -> RoundNum {
-        match self.round_of.get(event_hash) {
+#[wasm_bindgen]
+impl Graph {
+    pub fn round_of(&self, event_hash: String) -> RoundNum {
+        match self.round_of.get(&event_hash) {
             Some(r) => *r,
             None => self.round_index.iter().enumerate()
-                        .find(|(_,round)| round.contains(event_hash))
+                        .find(|(_,round)| round.contains(&event_hash))
                         .expect("Failed to find a round for event").0
         }
     }
 
     /// Determines if the event is a witness
-    pub fn determine_witness(&self, event_hash: &String) -> bool {
-        match self.events.get(event_hash).unwrap() {
+    pub fn determine_witness(&self, event_hash: String) -> bool {
+        match self.events.get(&event_hash).unwrap() {
             Genesis{ .. } => true,
             Update{ self_parent, .. } =>
-                self.round_of(event_hash) > self.round_of(self_parent)
+                self.round_of(event_hash) > self.round_of(self_parent.clone())
         }
     }
 
     /// Determine if the event is famous.
     /// An event is famous if 2/3 future witnesses strongly see it.
-    fn is_famous(&self, event_hash: &String) -> bool {
-        let event = self.events.get(event_hash).unwrap();
+    fn is_famous(&self, event_hash: String) -> bool {
+        let event = self.events.get(&event_hash).unwrap();
 
         match event {
             Genesis{ .. } => true,
             Update{ .. } => {
                 // Event must be a witness
-                if !self.determine_witness(event_hash) {
+                if !self.determine_witness(event_hash.clone()) {
                     return false
                 }
 
                 let witnesses = self.events.values()
                     .filter(|e| if let Some(_) = self.is_famous.get(&e.hash()) { true } else { false })
                     .fold(HashSet::new(), |mut set, e| {
-                        if self.strongly_see(&e.hash(), event_hash) {
+                        if self.strongly_see(e.hash(), event_hash.clone()) {
                             let creator = match *e {
                                 Update{ ref creator, .. } => creator,
                                 Genesis{ ref creator } => creator,
@@ -251,19 +254,19 @@ impl Graph {
         }
     }
 
-    fn ancestor(&self, x_hash: &String, y_hash: &String) -> bool {
-        let x = self.events.get(x_hash).unwrap();
-        let y = self.events.get(y_hash).unwrap();
+    fn ancestor(&self, x_hash: String, y_hash: String) -> bool {
+        let x = self.events.get(&x_hash).unwrap();
+        let y = self.events.get(&y_hash).unwrap();
 
-        match self.iter(x_hash).find(|e| e.hash() == *y_hash) {
+        match self.iter(&x_hash).find(|e| e.hash() == y_hash) {
             Some(_) => true,
             None => false,
         }
     }
 
-    fn strongly_see(&self, x_hash: &String, y_hash: &String) -> bool {
-        let mut creators_seen = self.iter(x_hash)
-            .filter(|e| self.ancestor(&e.hash(),y_hash))
+    fn strongly_see(&self, x_hash: String, y_hash: String) -> bool {
+        let mut creators_seen = self.iter(&x_hash)
+            .filter(|e| self.ancestor(e.hash(), y_hash.clone()))
             .fold(HashSet::new(), |mut set, event| {
                 let creator = match *event {
                     Update{ ref creator, .. } => creator,
@@ -274,7 +277,7 @@ impl Graph {
             });
 
         // Add self to seen set incase it wasn't traversed above
-        match self.events.get(x_hash).unwrap() {
+        match self.events.get(&x_hash).unwrap() {
             Genesis{ .. } => true,
             Update{ .. } => creators_seen.insert(self.peer_id.clone()),
         };
