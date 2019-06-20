@@ -7,10 +7,16 @@ let creators = {}
 
 document.getElementById('addEvent').addEventListener('click', () => {
     let other_parent = document.getElementById('inp_hash').value;
-    console.log(other_parent);
+    let creator_id = document.getElementById('creator_id').value;
 
     if (!other_parent) other_parent = null;
-    add_event(other_parent, 'yo_id')
+    if (creator_id)
+        add_event(other_parent, creator_id)
+});
+
+document.getElementById('addCreator').addEventListener('click', () => {
+    let creator_id = document.getElementById('creator_id').value;
+    if (creator_id) { new_graph(creator_id); }
 });
 
 let drag = simulation => {
@@ -94,7 +100,7 @@ function new_graph(creator_id) {
 
     const genesis_hash = Object.entries(JSON.parse(g.get_graph()).events)[0][0];
     nodes.push( Object.create({
-        creator: 'yo_id',
+        creator: creator_id,
         hash: genesis_hash
     }));
 
@@ -111,7 +117,7 @@ function add_event(other_parent, creator_id) {
     // Update d3
     if (h) {
         nodes.push( Object.create({
-            creator: 'yo_id',
+            creator: creator_id,
             hash: h
         }));
         links.push({
