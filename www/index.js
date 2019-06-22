@@ -73,10 +73,6 @@ let node = svg.append("g")
     .data(nodes)
     .join("circle")
     .attr("r", 5)
-    .attr("fill", d => {
-      const scale = d3.scaleOrdinal(d3.schemeCategory10);
-      return d => scale(d.group);
-    })
     .call(drag(sim));
 
 node.append("title").text(d => d.creator);
@@ -169,7 +165,7 @@ function restart() {
   // Apply the general update pattern to the nodes.
   node = node.data(nodes, function(d) { return d.hash;});
   node.exit().remove();
-  node = node.enter().append("circle").attr("fill", function(d) { return color(d.hash); }).attr("r", 8).merge(node);
+  node = node.enter().append("circle").attr("fill", function(d) { return color(d.creator); }).attr("r", 8).merge(node);
 
   // Apply the general update pattern to the links.
   link = link.data(links, function(d) { return d.source.hash + "-" + d.target.id; });
