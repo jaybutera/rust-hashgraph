@@ -16,7 +16,7 @@ document.getElementById('addEvent').addEventListener('click', () => {
 
 document.getElementById('addCreator').addEventListener('click', () => {
     let creator_id = document.getElementById('creator_id').value;
-    if (creator_id) { new_graph(creator_id); }
+    if (creator_id) { new_creator(creator_id); }
 });
 
 let drag = simulation => {
@@ -96,7 +96,7 @@ sim.on("tick", () => {
 function new_graph(creator_id) {
     let g = wasm.Graph.new(creator_id);
     // Store in creators dict
-    creators[creator_id] = g;
+    //creators[creator_id] = g;
 
     const genesis_hash = Object.entries(JSON.parse(g.get_graph()).events)[0][0];
     nodes.push( Object.create({
@@ -105,13 +105,27 @@ function new_graph(creator_id) {
     }));
 
     restart();
-    display_hash(genesis_hash);
-    return creators[creator_id];
+    display_hash(genesis_hash, g);
+    return g;//creators[creator_id];
+}
+
+function new_creator(creator_id) {
+    let h = g.add_creator(creator_id);
+
+    if (h) {
+        nodes.push( Object.create({
+            creator: creator_id,
+            hash: h
+        }));
+
+        restart();
+        display_hash(h,g);
+    }
 }
 
 function add_event(other_parent, creator_id) {
-    let g = creators[creator_id];
-    let h = g.add(other_parent, []);
+    //let g = creators[creator_id];
+    let h = g.add(other_parent, creator_id, []);
     let self_parent = Object.values(JSON.parse( g.get_event(h) ))[0].self_parent;
 
     // Update d3
@@ -132,7 +146,7 @@ function add_event(other_parent, creator_id) {
         }
 
         restart();
-        display_hash(h);
+        display_hash(h,g);
     }
 
 
@@ -144,9 +158,9 @@ function add_event(other_parent, creator_id) {
     return h;
 };
 
-function display_hash(hash) {
+function display_hash(hash, graph) {
     let p = document.createElement('p');
-    p.innerText = hash;
+    p.innerText = hash + ": round " + graph.round_of(hash);
     document.getElementById('hashes')
             .appendChild(p);
 }

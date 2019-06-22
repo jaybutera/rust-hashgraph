@@ -20,7 +20,7 @@ pub struct Graph {
     #[serde(skip)]
     is_famous: HashMap<String, bool>, // Some(false) means unfamous witness
     #[serde(skip)]
-    latest_event: String,
+    latest_event: HashMap<String, String>, // Creator id to event hash
     #[serde(skip)]
     round_of: HashMap<String, RoundNum>, // Just testing a caching system for now
 }
@@ -36,7 +36,7 @@ impl Graph {
             round_index: vec![HashSet::new()],
             creators: HashSet::new(),
             is_famous: HashMap::new(),
-            latest_event: genesis.hash(), // Gets reset in add_event
+            latest_event: HashMap::new(), // Gets reset in add_event
             round_of: HashMap::new(),
         };
 
@@ -47,14 +47,33 @@ impl Graph {
     pub fn add(
         &mut self,
         other_parent: Option<String>, // Events can be reactionary or independent of an "other"
+        creator: String,
         js_txs: Box<[JsValue]>) -> Option<String>
     {
         //let txs: Vec<Transaction> = Vec::from(js_txs);
         // TODO: This is complicated so ignoring txs for now
         let txs = vec![];
-        let event = self.create_event(other_parent, txs);
+        let creator_head_event = match self.latest_event.get(&creator) {
+            Some(h) => h,
+            None => { return None },
+        };
+
+        let event = Event::Update {
+            creator: creator, // TODO: This is specifiable in the wasm api for now because the Event type can't be passed over JS
+            self_parent: creator_head_event.clone(),
+            other_parent: other_parent,
+            txs: txs,
+        };
 
         let hash = event.hash();
+        if self.add_event(event).is_ok() { Some(hash) }
+        else { None }
+    }
+
+    pub fn add_creator(&mut self, _creator: String) -> Option<String> {
+        let event = Genesis { creator: _creator };
+        let hash = event.hash();
+
         if self.add_event(event).is_ok() { Some(hash) }
         else { None }
     }
@@ -76,9 +95,10 @@ impl Graph {
         other_parent: Option<String>, // Events can be reactionary or independent of an "other"
         txs: Vec<Transaction>) -> Event
     {
+        let latest_ev = self.latest_event.get( &self.peer_id ).expect("Peer id should always have an entry in latest_event");
         Event::Update {
             creator: self.peer_id.clone(),
-            self_parent: self.events.get( &self.latest_event ).expect("Should always have a self parent from genesis").hash(),
+            self_parent: self.events.get( latest_ev ).expect("Should always have a self parent from genesis").hash(),
             other_parent: other_parent,
             txs: txs,
         }
@@ -101,15 +121,15 @@ impl Graph {
         let event_hash = event.hash();
         self.events.insert(event_hash.clone(), event);
 
-        { // Add event to creators list if it isn't already there
+        { // Add event to creators list if it isn't already there and update creator's latest event
             let event = self.events.get(&event_hash).unwrap();
             match event {
-                Genesis{ creator, .. } => self.creators.insert(creator.clone()),
+                Genesis{ creator, .. } => {
+                    self.latest_event.insert(creator.clone(), event_hash.clone());
+                    self.creators.insert(creator.clone())
+                },
                 Update { creator, .. } => {
-                    // Set this event as latest received
-                    if *creator == self.peer_id {
-                        self.latest_event = event_hash.clone();
-                    }
+                    self.latest_event.insert(creator.clone(), event_hash.clone());
                     self.creators.insert(creator.clone())
                 },
             };
@@ -352,9 +372,9 @@ mod tests {
         let mut peer2 = Graph::new(c2);
         let mut peer3 = Graph::new(c3);
 
-        let g1_hash = peer1.events.get(&peer1.latest_event).unwrap().hash();
-        let g2_hash = peer2.events.get(&peer2.latest_event).unwrap().hash();
-        let g3_hash = peer3.events.get(&peer3.latest_event).unwrap().hash();
+        let g1_hash = peer1.events.get(&peer1.latest_event.get(peer1.peer_id).unwrap()).unwrap().hash();
+        let g2_hash = peer2.events.get(&peer2.latest_event.get(peer2.peer_id).unwrap()).unwrap().hash();
+        let g3_hash = peer3.events.get(&peer3.latest_event.get(peer3.peer_id).unwrap()).unwrap().hash();
 
         // Share genesis events
         peer1.add_event(peer2.events.get(&g2_hash).unwrap().clone());
