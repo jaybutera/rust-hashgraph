@@ -3,8 +3,11 @@ import * as wasm from "rust-hashgraph";
 // Globals
 let creators = {}
   , nodes = []
-  , links = [];
+  , links = []
+  // Creator id -> event hash
+  , latest_event = {};
 
+/*
 document.getElementById('addEvent').addEventListener('click', () => {
     let other_parent = document.getElementById('inp_hash').value;
     let creator_id = document.getElementById('creator_id').value;
@@ -13,10 +16,25 @@ document.getElementById('addEvent').addEventListener('click', () => {
     if (creator_id)
         add_event(other_parent, creator_id)
 });
+*/
 
 document.getElementById('addCreator').addEventListener('click', () => {
     let creator_id = document.getElementById('creator_id').value;
     if (creator_id) { new_creator(creator_id); }
+});
+
+document.getElementById('createEvent').addEventListener('click', () => {
+    const by_id   = document.getElementById('by_creator').value;
+    const from_id = document.getElementById('from_creator').value;
+
+    let other_parent;
+    if (!from_id)
+        other_parent = null;
+    else
+        other_parent = latest_event[from_id];
+
+    if (by_id)
+        add_event(other_parent, by_id)
 });
 
 let drag = simulation => {
@@ -45,8 +63,8 @@ let drag = simulation => {
 
 const svg = d3.select("body")
     .append('svg')
-    .attr('width', 500)
-    .attr('height', 200);
+    .attr('width', 800)
+    .attr('height', 300);
 
 const width = svg.attr('width'),
       height = svg.attr('height'),
@@ -54,7 +72,7 @@ const width = svg.attr('width'),
 
 const sim = d3.forceSimulation()
     .nodes(nodes)
-    .force('link', d3.forceLink(links).id(n => n.hash))
+    .force('link', d3.forceLink(links).id(n => n.hash).distance(30))
     .force('charge', d3.forceManyBody())
     .force('center', d3.forceCenter(width/2, height/2));
 
@@ -95,7 +113,11 @@ function new_graph(creator_id) {
     }));
 
     restart();
-    display_hash(genesis_hash, g);
+
+    // Update latest event global record
+    latest_event[creator_id] = genesis_hash;
+
+    //display_hash(genesis_hash, g);
     return g;
 }
 
@@ -109,7 +131,11 @@ function new_creator(creator_id) {
         }));
 
         restart();
-        display_hash(h,g);
+
+        // Update latest event global record
+        latest_event[creator_id] = h;
+
+        //display_hash(h,g);
     }
 }
 
@@ -135,7 +161,11 @@ function add_event(other_parent, creator_id) {
         }
 
         restart();
-        display_hash(h,g);
+
+        // Update latest event global record
+        latest_event[creator_id] = h;
+
+        //display_hash(h,g);
     }
 
 
@@ -156,14 +186,14 @@ function display_hash(hash, graph) {
 
 function restart() {
     // Add new circle/labels
-    let n = nodeGroup.selectAll('g').data(nodes).enter().append('g');
+    let n = nodeGroup.selectAll('g').data(nodes).enter().append('g');//.on('mouseover', console.log('hey'));
     n
         .append('circle')
         .attr('fill', d => { return color(d.creator) })
-        .attr('r', 5).call(drag(sim));
-    n
-        .append('text')
-        .text(d => { return d.hash });
+        .attr('r', 8).call(drag(sim));
+    //n
+        //.append('text')
+        //.text(d => { return d.hash });
 
     // Apply the general update pattern to the links.
     link = link.data(links, function(d) { return d.source.hash + "-" + d.target.id; });
@@ -177,5 +207,5 @@ function restart() {
 }
 
 // Start a graph
-let creator = 'yo_id'
+let creator = 'c1'
 let g = new_graph(creator);
