@@ -110,7 +110,7 @@ let link = svg.append("g")
     .join("line")
     .attr("stroke-width", d => Math.sqrt(d.value));
 
-let nodeGroup = svg.append('g')
+var nodeGroup = svg.append('g')
     .classed('node', true);
 
 sim.on("tick", () => {
@@ -138,7 +138,7 @@ function new_graph(creator_id) {
         hash: genesis_hash
     }));
 
-    restart();
+    restart(g);
 
     // Update latest event global record
     latest_event[creator_id] = genesis_hash;
@@ -157,7 +157,7 @@ function new_creator(creator_id) {
             hash: h
         }));
 
-        restart();
+        restart(g);
 
         // Update latest event global record
         latest_event[creator_id] = h;
@@ -188,7 +188,7 @@ function add_event(other_parent, creator_id) {
             });
         }
 
-        restart();
+        restart(g);
 
         // Update latest event global record
         latest_event[creator_id] = h;
@@ -213,16 +213,17 @@ function display_hash(hash, graph) {
             .appendChild(p);
 }
 
-function restart() {
+function restart(g) {
     // Add new circle/labels
     let n = nodeGroup.selectAll('g').data(nodes).enter().append('g');//.on('mouseover', console.log('hey'));
     n
         .append('circle')
         .attr('fill', d => { return color(d.creator) })
         .attr('r', 8).call(drag(sim));
-    //n
-        //.append('text')
-        //.text(d => { return d.hash });
+    n
+        .on('mouseover', console.log('hey'))
+        .append('text')
+        .text(d => 'round: ' + g.round_of(d.hash) );
 
     // Apply the general update pattern to the links.
     link = link.data(links, function(d) { return d.source.hash + "-" + d.target.id; });
@@ -237,4 +238,4 @@ function restart() {
 
 // Start a graph
 let creator = 'c1'
-let g = new_graph(creator);
+var g = new_graph(creator);
