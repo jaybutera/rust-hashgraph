@@ -1,11 +1,12 @@
 import * as wasm from "rust-hashgraph";
 
 // Globals
-let creators = {}
-  , nodes = []
+let
+    nodes = []
   , links = []
   // Creator id -> event hash
-  , latest_event = {};
+  , latest_event = {}
+  , latest_creator;
 
 /*
 document.getElementById('addEvent').addEventListener('click', () => {
@@ -17,6 +18,31 @@ document.getElementById('addEvent').addEventListener('click', () => {
         add_event(other_parent, creator_id)
 });
 */
+
+document.getElementById('randomWalkEvent').addEventListener('click', () => {
+    // Randomly select the self_parent
+    const creators = Object.keys(latest_event);
+    const rnd_idx = Math.floor( Math.random() * creators.length );
+    console.log('i: ' + rnd_idx);
+
+    let   other_parent = latest_event[latest_creator];
+    const creator_id   = creators[rnd_idx];
+    console.log('creator id: ' + creator_id);
+    console.log('op: ' + other_parent);
+    //let   self_parent  = latest_event[ creators[rnd_idx] ];
+
+    // Normalize for rust api
+    if (creator_id == latest_creator)
+        other_parent = null;
+
+    add_event(other_parent, creator_id);
+    /*
+    do {
+        let rnd_idx = Math.random() * creators.length;
+        self_parent = latest_event[ creators[rnd_idx] ];
+    } while (self_parent != other_parent);
+    */
+});
 
 document.getElementById('addCreator').addEventListener('click', () => {
     let creator_id = document.getElementById('creator_id').value;
@@ -116,6 +142,7 @@ function new_graph(creator_id) {
 
     // Update latest event global record
     latest_event[creator_id] = genesis_hash;
+    latest_creator = creator_id;
 
     //display_hash(genesis_hash, g);
     return g;
@@ -134,6 +161,7 @@ function new_creator(creator_id) {
 
         // Update latest event global record
         latest_event[creator_id] = h;
+        latest_creator = creator_id;
 
         //display_hash(h,g);
     }
@@ -164,6 +192,7 @@ function add_event(other_parent, creator_id) {
 
         // Update latest event global record
         latest_event[creator_id] = h;
+        latest_creator = creator_id;
 
         //display_hash(h,g);
     }
