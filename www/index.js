@@ -66,16 +66,8 @@ let link = svg.append("g")
     .join("line")
     .attr("stroke-width", d => Math.sqrt(d.value));
 
-let node = svg.append("g")
-    .attr("stroke", "#fff")
-    .attr("stroke-width", 1.5)
-    .selectAll("circle")
-    .data(nodes)
-    .join("circle")
-    .attr("r", 5)
-    .call(drag(sim));
-
-node.append("title").text(d => d.creator);
+let nodeGroup = svg.append('g')
+    .classed('node', true);
 
 sim.on("tick", () => {
     link
@@ -84,15 +76,17 @@ sim.on("tick", () => {
         .attr("x2", d => d.target.x)
         .attr("y2", d => d.target.y);
 
-    node
+    let n = nodeGroup.selectAll('g');
+    n.select('circle')
         .attr("cx", d => d.x)
         .attr("cy", d => d.y);
+    n.select('text')
+        .attr("x", d => d.x)
+        .attr("y", d => d.y);
 });
 
 function new_graph(creator_id) {
     let g = wasm.Graph.new(creator_id);
-    // Store in creators dict
-    //creators[creator_id] = g;
 
     const genesis_hash = Object.entries(JSON.parse(g.get_graph()).events)[0][0];
     nodes.push( Object.create({
@@ -102,7 +96,7 @@ function new_graph(creator_id) {
 
     restart();
     display_hash(genesis_hash, g);
-    return g;//creators[creator_id];
+    return g;
 }
 
 function new_creator(creator_id) {
@@ -120,7 +114,6 @@ function new_creator(creator_id) {
 }
 
 function add_event(other_parent, creator_id) {
-    //let g = creators[creator_id];
     let h = g.add(other_parent, creator_id, []);
     let self_parent = Object.values(JSON.parse( g.get_event(h) ))[0].self_parent;
 
@@ -162,20 +155,25 @@ function display_hash(hash, graph) {
 }
 
 function restart() {
-  // Apply the general update pattern to the nodes.
-  node = node.data(nodes, function(d) { return d.hash;});
-  node.exit().remove();
-  node = node.enter().append("circle").attr("fill", function(d) { return color(d.creator); }).attr("r", 8).merge(node);
+    // Add new circle/labels
+    let n = nodeGroup.selectAll('g').data(nodes).enter().append('g');
+    n
+        .append('circle')
+        .attr('fill', d => { return color(d.creator) })
+        .attr('r', 5).call(drag(sim));
+    n
+        .append('text')
+        .text(d => { return d.hash });
 
-  // Apply the general update pattern to the links.
-  link = link.data(links, function(d) { return d.source.hash + "-" + d.target.id; });
-  link.exit().remove();
-  link = link.enter().append("line").merge(link);
+    // Apply the general update pattern to the links.
+    link = link.data(links, function(d) { return d.source.hash + "-" + d.target.id; });
+    link.exit().remove();
+    link = link.enter().append("line").merge(link);
 
-  // Update and restart the simulation.
-  sim.nodes(nodes);
-  sim.force("link").links(links);
-  sim.alpha(1).restart();
+    // Update and restart the simulation.
+    sim.nodes(nodes);
+    sim.force("link").links(links);
+    sim.alpha(1).restart();
 }
 
 // Start a graph
