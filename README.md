@@ -1,8 +1,17 @@
 An implementation of the SWIRLDS HashGraph Consensus Algorithm as specified in [the
-paper](https://www.swirlds.com/downloads/SWIRLDS-TR-2016-01.pdf).
+paper](https://www.swirlds.com/downloads/SWIRLDS-TR-2016-01.pdf). This is a
+library that provides all the functions needed to reach consensus.
 
-## Usage
-For now, you can just run the tests with ```cargo test```. The unit tests in the graph module are the necessary steps to
+## Interact in the browser
+The library compiles to [WebAssembly](https://webassembly.org/) and can be
+invoked like a normal ES6 module. The ```www``` directory contains a javascript
+webapp to interactively build and visualize a hashgraph as a force directed
+graph in [D3.js](https://d3js.org/).
+
+## Tests
+*Right now tests aren't work as the interface has changed to support wasm*
+
+Run the tests with ```cargo test```. The unit tests in the graph module are the necessary steps to
 order all events topologically according to the HashGraph algorithm.
 
 ![Tests snapshot](https://i.imgur.com/eilv4Vk.png)
@@ -17,3 +26,6 @@ The main.rs file contains the project binary. This is effectively an event loop 
 ## TODO
 - Nodes send and receive events on gossip network with rust-libp2p
 - Graph traversal optimizations
+- Right now cloning strings is abundant to support the js/wasm cross-boundary.
+  There should be workarounds for this, or at least a macro system to generate
+  an optimized version for native.
