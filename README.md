@@ -3,6 +3,9 @@ paper](https://www.swirlds.com/downloads/SWIRLDS-TR-2016-01.pdf). This is a
 library that provides all the functions needed to reach consensus.
 
 ## Interact in the browser
+![Force directed hashgraph](https://github.com/jaybutera/rust-hashgraph/blob/master/web_screenshot.png)
+
+
 The library compiles to [WebAssembly](https://webassembly.org/) and can be
 invoked like a normal ES6 module. The ```www``` directory contains a javascript
 webapp to interactively build and visualize a hashgraph as a force directed
