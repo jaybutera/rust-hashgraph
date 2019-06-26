@@ -3,6 +3,7 @@ use crypto::sha3::Sha3;
 use crypto::digest::Digest;
 use std::collections::{HashMap,HashSet};
 use wasm_bindgen::prelude::*;
+use crate::types::benchmark::time_fn;
 
 use super::event::Event::{self,*};
 use super::{Transaction, RoundNum};
@@ -138,7 +139,8 @@ impl Graph {
 
         //-- Set event's round
         let last_idx = self.round_index.len()-1;
-        let r = self.determine_round(&event_hash);
+        let (t, r) = time_fn(|| self.determine_round(&event_hash));
+        println!("determine_round: {}ms", t);
         // Cache result
         self.round_of.insert(event_hash.clone(), r);
 
@@ -203,7 +205,9 @@ impl Graph {
                 let witnesses_strongly_seen = round.iter()
                     .filter(|e| if let Some(_) = self.is_famous.get(&e.hash()) { true } else { false })
                     .fold(HashSet::new(), |mut set, e| {
-                        if self.strongly_see(event_hash.clone(), e.hash()) {
+                        let (t,r) = time_fn(|| self.strongly_see(event_hash.clone(), e.hash()));
+                        println!("strongly see: {}ms", t);
+                        if r {
                             let creator = match *e {
                                 Update{ ref creator, .. } => creator,
                                 Genesis{ ref creator } => creator,
@@ -533,7 +537,7 @@ mod tests {
 
         for i in 0..num_steps {
             // Chose a random receiver
-            let rnd: usize = random();// % creators.len();
+            let rnd: usize = random();
             let creator_id = creators[rnd % creators.len()];
 
             let event = Event::Update {
