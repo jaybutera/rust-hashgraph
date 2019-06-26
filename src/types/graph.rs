@@ -372,9 +372,12 @@ mod tests {
         let mut peer2 = Graph::new(c2);
         let mut peer3 = Graph::new(c3);
 
-        let g1_hash = peer1.events.get(&peer1.latest_event.get(peer1.peer_id).unwrap()).unwrap().hash();
-        let g2_hash = peer2.events.get(&peer2.latest_event.get(peer2.peer_id).unwrap()).unwrap().hash();
-        let g3_hash = peer3.events.get(&peer3.latest_event.get(peer3.peer_id).unwrap()).unwrap().hash();
+        let p1_g: &String = peer1.latest_event.get(&peer1.peer_id).unwrap();
+        let p2_g: &String = peer2.latest_event.get(&peer2.peer_id).unwrap();
+        let p3_g: &String = peer3.latest_event.get(&peer3.peer_id).unwrap();
+        let g1_hash = peer1.events.get(p1_g).unwrap().hash();
+        let g2_hash = peer2.events.get(p2_g).unwrap().hash();
+        let g3_hash = peer3.events.get(p3_g).unwrap().hash();
 
         // Share genesis events
         peer1.add_event(peer2.events.get(&g2_hash).unwrap().clone());
@@ -384,10 +387,9 @@ mod tests {
         peer3.add_event(peer1.events.get(&g1_hash).unwrap().clone());
         peer3.add_event(peer2.events.get(&g2_hash).unwrap().clone());
 
-        // Peer1 receives an update from peer1, and creates an event for it
+        // Peer1 receives an update from peer2, and creates an event for it
         let e1 = peer1.create_event(
             Some(g2_hash.clone()),
-            peer2.peer_id.clone(),
             vec![]);
         let e1_hash = e1.hash();
         peer1.add_event(e1.clone());
@@ -396,7 +398,6 @@ mod tests {
 
         let e2 = peer2.create_event(
             Some(e1_hash.clone()),
-            peer3.peer_id.clone(),
             vec![]);
         let e2_hash = e2.hash();
         peer1.add_event(e2.clone());
@@ -405,7 +406,6 @@ mod tests {
 
         let e3 = peer3.create_event(
             Some(e2_hash.clone()),
-            peer2.peer_id.clone(),
             vec![]);
         let e3_hash = e3.hash();
         peer1.add_event(e3.clone());
@@ -414,7 +414,6 @@ mod tests {
 
         let e4 = peer2.create_event(
             Some(e3_hash.clone()),
-            peer1.peer_id.clone(),
             vec![]);
         let e4_hash = e4.hash();
         peer1.add_event(e4.clone());
@@ -423,7 +422,6 @@ mod tests {
 
         let e5 = peer1.create_event(
             Some(e4_hash.clone()),
-            peer3.peer_id.clone(),
             vec![]);
         let e5_hash = e5.hash();
         peer1.add_event(e5.clone());
@@ -432,7 +430,6 @@ mod tests {
 
         let e6 = peer3.create_event(
             Some(e5_hash.clone()),
-            peer2.peer_id.clone(),
             vec![]);
         let e6_hash = e6.hash();
         peer1.add_event(e6.clone());
@@ -441,7 +438,6 @@ mod tests {
 
         let e7 = peer2.create_event(
             Some(e6_hash.clone()),
-            peer1.peer_id.clone(), // Outgoing doesn't matter
             vec![]);
         let e7_hash = e7.hash();
         peer1.add_event(e7.clone());
@@ -458,8 +454,9 @@ mod tests {
         assert_eq!(
             true,
             graph.0.ancestor(
-                &event_hashes[3],
-                &event_hashes[0]))
+                event_hashes[3].clone(),
+                event_hashes[0].clone())
+        )
     }
 
     #[test]
@@ -469,13 +466,13 @@ mod tests {
         assert_eq!(
             false,
             graph.0.strongly_see(
-                &event_hashes[4],
-                &event_hashes[0]));
+                event_hashes[4].clone(),
+                event_hashes[0].clone()));
         assert_eq!(
             true,
             graph.0.strongly_see(
-                &event_hashes[6],
-                &event_hashes[0]));
+                event_hashes[6].clone(),
+                event_hashes[0].clone()));
     }
 
     #[test]
@@ -498,13 +495,13 @@ mod tests {
 
         assert_eq!(
             false,
-            graph.0.determine_witness(&event_hashes[5]));
+            graph.0.determine_witness(event_hashes[5].clone()));
         assert_eq!(
             true,
-            graph.0.determine_witness(&event_hashes[6]));
+            graph.0.determine_witness(event_hashes[6].clone()));
         assert_eq!(
             true,
-            graph.0.determine_witness(&event_hashes[7]));
+            graph.0.determine_witness(event_hashes[7].clone()));
     }
 
     #[test]
@@ -513,9 +510,9 @@ mod tests {
 
         assert_eq!(
             true,
-            graph.0.is_famous(&event_hashes[0]));
+            graph.0.is_famous(event_hashes[0].clone()));
         assert_eq!(
             false,
-            graph.0.is_famous(&event_hashes[3]));
+            graph.0.is_famous(event_hashes[3].clone()));
     }
 }
