@@ -90,6 +90,7 @@ impl Graph {
 }
 
 impl Graph {
+    // Convenience function, thought it looked nice, idk might delete later
     pub fn create_event(
         &self,
         other_parent: Option<String>, // Events can be reactionary or independent of an "other"
@@ -514,5 +515,36 @@ mod tests {
         assert_eq!(
             false,
             graph.0.is_famous(event_hashes[3].clone()));
+    }
+
+    // Create a single graph as a random walk of events from one creator to the next
+    #[test]
+    fn random_walk() {
+        use rand::prelude::*;
+
+        let num_steps = 10;
+        let creators = ["c1", "c2", "c3"];
+
+        let mut g = Graph::new( creators[0].to_string() );
+        for c in creators.iter() {
+            g.add_creator( c.to_string() );
+        }
+        let mut last_event: String = g.latest_event[ creators[0] ].clone();
+
+        for i in 0..num_steps {
+            // Chose a random receiver
+            let rnd: usize = random();// % creators.len();
+            let creator_id = creators[rnd % creators.len()];
+
+            let event = Event::Update {
+                creator: creator_id.to_string(),
+                self_parent: g.latest_event[creator_id].clone(),//.unwrap(),
+                other_parent: Some(last_event),
+                txs: Vec::new(),
+            };
+
+            last_event = event.hash();
+            g.add_event(event);
+        }
     }
 }
