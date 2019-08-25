@@ -140,7 +140,7 @@ impl Graph {
         //-- Set event's round
         let last_idx = self.round_index.len()-1;
         let (t, r) = time_fn(|| self.determine_round(&event_hash));
-        println!("determine_round: {}ms", t);
+        //println!("determine_round: {}ms", t);
         // Cache result
         self.round_of.insert(event_hash.clone(), r);
 
@@ -189,30 +189,32 @@ impl Graph {
                 } else {
                 let r = match other_parent {
                     Some(op) => std::cmp::max(
-                        self.determine_round(self_parent),
-                        self.determine_round(op),
+                        // TODO: Is this ok to unwrap?
+                        self.round_of[self_parent],
+                        self.round_of[op],
+                        //self.determine_round(self_parent),
+                        //self.determine_round(op),
                     ),
-                    None => self.determine_round(self_parent),
+                    None => self.round_of[self_parent],
+                    //None => self.determine_round(self_parent),
                 };
 
-                // Get events from round r
-                let round = self.round_index[r].iter()
+                // Find out how many witness from round r by unique creators the event can strongly see
+                let witnesses_strongly_seen = self.round_index[r].iter()
                     .filter(|eh| *eh != event_hash)
-                    .map(|e_hash| self.events.get(e_hash).unwrap())
-                    .collect::<Vec<_>>();
+                    .filter(|e_hash| self.is_famous.get(&e_hash.to_string()).is_some() )
+                    .fold(HashSet::new(), |mut set, e_hash| {
 
-                // Find out how many witnesses by unique members the event can strongly see
-                let witnesses_strongly_seen = round.iter()
-                    .filter(|e| if let Some(_) = self.is_famous.get(&e.hash()) { true } else { false })
-                    .fold(HashSet::new(), |mut set, e| {
-                        let (t,r) = time_fn(|| self.strongly_see(event_hash.clone(), e.hash()));
-                        println!("strongly see: {}ms", t);
+                        let (t,r) = time_fn(|| self.strongly_see(event_hash.clone(), e_hash.to_string()));
+                        //println!("strongly see: {}ms", t);
+
                         if r {
+                            let e = self.events.get(e_hash).unwrap();
                             let creator = match *e {
                                 Update{ ref creator, .. } => creator,
                                 Genesis{ ref creator } => creator,
                             };
-                            set.insert(creator.clone());
+                            set.insert(creator);
                         }
                         set
                     });
@@ -297,14 +299,14 @@ impl Graph {
                     Update{ ref creator, .. } => creator,
                     Genesis{ ref creator } => creator,
                 };
-                set.insert(creator.clone());
+                set.insert(creator);
                 set
             });
 
         // Add self to seen set incase it wasn't traversed above
         match self.events.get(&x_hash).unwrap() {
             Genesis{ .. } => true,
-            Update{ .. } => creators_seen.insert(self.peer_id.clone()),
+            Update{ .. } => creators_seen.insert(&self.peer_id),
         };
 
         let n = self.creators.len();
@@ -522,11 +524,10 @@ mod tests {
     }
 
     // Create a single graph as a random walk of events from one creator to the next
-    #[test]
     fn random_walk() {
         use rand::prelude::*;
 
-        let num_steps = 10;
+        let num_steps = 100;
         let creators = ["c1", "c2", "c3"];
 
         let mut g = Graph::new( creators[0].to_string() );
@@ -543,12 +544,20 @@ mod tests {
             let event = Event::Update {
                 creator: creator_id.to_string(),
                 self_parent: g.latest_event[creator_id].clone(),//.unwrap(),
-                other_parent: Some(last_event),
+                other_parent: Some(last_event.clone()),
                 txs: Vec::new(),
             };
 
-            last_event = event.hash();
+            let (t, last_event) = time_fn(|| event.hash());
+            //let last_event = event.hash();
+            //println!("hash took: {}ms", t);
             g.add_event(event);
         }
+    }
+
+    #[test]
+    fn test_random_walk() {
+        let (t,_) = time_fn(|| random_walk());
+        println!("Random walk took {}ms", t);
     }
 }
