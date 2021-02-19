@@ -2,6 +2,7 @@ An implementation of the SWIRLDS HashGraph Consensus Algorithm as specified in [
 paper](https://www.swirlds.com/downloads/SWIRLDS-TR-2016-01.pdf). This is a
 library that provides all the functions needed to reach consensus.
 
+*This code uses iterators to traverse commitments, and although it is a pretty abstraction, it can be slow. I re-implemented the library using conventional graph search algorithms and matrix math [here](https://github.com/jaybutera/fast-hashgraph). Performance is improved dramatically.*
 ## Interact in the browser
 ![Force directed hashgraph](https://github.com/jaybutera/rust-hashgraph/blob/master/web_screenshot.png)
 
