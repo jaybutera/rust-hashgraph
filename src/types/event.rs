@@ -1,7 +1,7 @@
-use serde::{Serialize,Deserialize};
-use crypto::sha3::Sha3;
-use crypto::digest::Digest;
 use super::Transaction;
+use crypto::digest::Digest;
+use crypto::sha3::Sha3;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone)] // Clone is temporary for graph unit tests
 pub enum Event {
@@ -11,7 +11,9 @@ pub enum Event {
         other_parent: Option<String>,
         txs: Vec<Transaction>,
     },
-    Genesis{creator: String},
+    Genesis {
+        creator: String,
+    },
 }
 
 impl Event {
@@ -22,4 +24,3 @@ impl Event {
         hasher.result_str()
     }
 }
-

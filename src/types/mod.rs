@@ -1,7 +1,7 @@
-use serde::{Serialize,Deserialize};
+use serde::{Deserialize, Serialize};
 
-pub mod graph;
 pub mod event;
+pub mod graph;
 
 #[derive(Serialize, Deserialize, Clone)] // TODO: Does this need clone?
 pub struct Transaction;
