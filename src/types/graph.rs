@@ -351,6 +351,14 @@ mod tests {
     use std::collections::HashMap;
     use super::*;
 
+    fn distribute_event<'a, I>(peers: I, event: Event)
+    where
+        I: IntoIterator<Item = &'a mut Graph> {
+        for peer in peers {
+            peer.add_event(event.clone()).unwrap();
+        }
+    }
+
     fn generate() -> ((Graph,Graph,Graph), [String;10]) {
         /* Generates the following graph for each member (c1,c2,c3)
          *
@@ -371,80 +379,70 @@ mod tests {
         let mut peer1 = Graph::new(c1);
         let mut peer2 = Graph::new(c2);
         let mut peer3 = Graph::new(c3);
-
+        
         let p1_g: &String = peer1.latest_event.get(&peer1.peer_id).unwrap();
         let p2_g: &String = peer2.latest_event.get(&peer2.peer_id).unwrap();
         let p3_g: &String = peer3.latest_event.get(&peer3.peer_id).unwrap();
         let g1_hash = peer1.events.get(p1_g).unwrap().hash();
         let g2_hash = peer2.events.get(p2_g).unwrap().hash();
         let g3_hash = peer3.events.get(p3_g).unwrap().hash();
-
+        
         // Share genesis events
-        peer1.add_event(peer2.events.get(&g2_hash).unwrap().clone());
-        peer1.add_event(peer3.events.get(&g3_hash).unwrap().clone());
-        peer2.add_event(peer3.events.get(&g3_hash).unwrap().clone());
-        peer2.add_event(peer1.events.get(&g1_hash).unwrap().clone());
-        peer3.add_event(peer1.events.get(&g1_hash).unwrap().clone());
-        peer3.add_event(peer2.events.get(&g2_hash).unwrap().clone());
+        peer1.add_event(peer2.events.get(&g2_hash).unwrap().clone()).unwrap();
+        peer1.add_event(peer3.events.get(&g3_hash).unwrap().clone()).unwrap();
+        peer2.add_event(peer3.events.get(&g3_hash).unwrap().clone()).unwrap();
+        peer2.add_event(peer1.events.get(&g1_hash).unwrap().clone()).unwrap();
+        peer3.add_event(peer1.events.get(&g1_hash).unwrap().clone()).unwrap();
+        peer3.add_event(peer2.events.get(&g2_hash).unwrap().clone()).unwrap();
+
+        let mut peers = vec![peer1, peer2, peer3];
 
         // Peer1 receives an update from peer2, and creates an event for it
-        let e1 = peer1.create_event(
+        let e1 = peers[0].create_event(
             Some(g2_hash.clone()),
             vec![]);
         let e1_hash = e1.hash();
-        peer1.add_event(e1.clone());
-        peer2.add_event(e1.clone());
-        peer3.add_event(e1.clone());
+        distribute_event(&mut peers, e1);
 
-        let e2 = peer2.create_event(
+        let e2 = peers[1].create_event(
             Some(e1_hash.clone()),
             vec![]);
         let e2_hash = e2.hash();
-        peer1.add_event(e2.clone());
-        peer2.add_event(e2.clone());
-        peer3.add_event(e2.clone());
+        distribute_event(&mut peers, e2);
 
-        let e3 = peer3.create_event(
+        let e3 = peers[2].create_event(
             Some(e2_hash.clone()),
             vec![]);
         let e3_hash = e3.hash();
-        peer1.add_event(e3.clone());
-        peer2.add_event(e3.clone());
-        peer3.add_event(e3.clone());
+        distribute_event(&mut peers, e3);
 
-        let e4 = peer2.create_event(
+        let e4 = peers[1].create_event(
             Some(e3_hash.clone()),
             vec![]);
         let e4_hash = e4.hash();
-        peer1.add_event(e4.clone());
-        peer2.add_event(e4.clone());
-        peer3.add_event(e4.clone());
+        distribute_event(&mut peers, e4);
 
-        let e5 = peer1.create_event(
+        let e5 = peers[0].create_event(
             Some(e4_hash.clone()),
             vec![]);
         let e5_hash = e5.hash();
-        peer1.add_event(e5.clone());
-        peer2.add_event(e5.clone());
-        peer3.add_event(e5.clone());
+        distribute_event(&mut peers, e5);
 
-        let e6 = peer3.create_event(
+        let e6 = peers[2].create_event(
             Some(e5_hash.clone()),
             vec![]);
         let e6_hash = e6.hash();
-        peer1.add_event(e6.clone());
-        peer2.add_event(e6.clone());
-        peer3.add_event(e6.clone());
+        distribute_event(&mut peers, e6);
 
-        let e7 = peer2.create_event(
+        let e7 = peers[1].create_event(
             Some(e6_hash.clone()),
             vec![]);
         let e7_hash = e7.hash();
-        peer1.add_event(e7.clone());
-        peer2.add_event(e7.clone());
-        peer3.add_event(e7.clone());
+        distribute_event(&mut peers, e7);
 
-        ((peer1, peer2, peer3), [g1_hash, g2_hash, g3_hash, e1_hash, e2_hash, e3_hash, e4_hash, e5_hash, e6_hash, e7_hash])
+        let mut peers = peers.into_iter();
+        let peers = (peers.next().unwrap(), peers.next().unwrap(), peers.next().unwrap());
+        (peers, [g1_hash, g2_hash, g3_hash, e1_hash, e2_hash, e3_hash, e4_hash, e5_hash, e6_hash, e7_hash])
     }
 
     #[test]
