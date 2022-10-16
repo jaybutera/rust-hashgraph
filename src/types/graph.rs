@@ -404,7 +404,7 @@ impl<'a> Iterator for EventIter<'a> {
 #[cfg(test)]
 mod tests {
 
-    use std::{hash::Hash, iter::FromIterator};
+    use std::iter::FromIterator;
 
     use super::*;
 
@@ -522,7 +522,7 @@ mod tests {
 
     /// Returns graphs of peers a, b, c, d, e and hashmap of event hashes in form
     /// a1, b2, c1, ...
-    fn generate_from_paper() -> ((Graph, Graph, Graph, Graph, Graph), HashMap<String, Vec<String>>) {
+    fn generate_from_paper() -> HashMap<String, (Graph, Vec<String>)> {
         let mut peers = vec![];
         let letters = ["a", "b", "c", "d", "e"];
         for l in letters {
@@ -573,28 +573,22 @@ mod tests {
         let mut map = HashMap::<_, _>::from_iter(
             letters.iter()
                 .map(|&l| l.to_owned())
-                .zip(std::iter::repeat_with(Vec::new))
+                .zip(
+                    peers.into_iter()
+                        .zip(std::iter::repeat_with(Vec::new))
+                )
         );
-        for (peer, l) in peers.iter().zip(letters) {
+        for (l, (peer, v)) in map.iter_mut() {
             let self_events = {
                 let mut list = peer.iter(peer.latest_event.get(l).unwrap()).node_list;
                 list.reverse();
                 list
             };
             for self_event in self_events {
-                let v = map.get_mut(l).unwrap();
                 v.push(self_event.hash());
             }
         }
-        let mut peers = peers.into_iter();
-        let peers = (
-            peers.next().unwrap(),
-            peers.next().unwrap(),
-            peers.next().unwrap(),
-            peers.next().unwrap(),
-            peers.next().unwrap(),
-        );
-        (peers, map)
+        map
     }
 
     #[test]
@@ -606,14 +600,14 @@ mod tests {
             .ancestor(&event_hashes[3], &event_hashes[0]));
 
         
-        let (graphs, event_hashes) = generate_from_paper();
-        assert!(graphs.3.ancestor(
-            &event_hashes.get("c").unwrap()[5],
-            &event_hashes.get("b").unwrap()[0]
+        let graphs = generate_from_paper();
+        assert!(graphs.get("c").unwrap().0.ancestor(
+            &graphs.get("c").unwrap().1[5],
+            &graphs.get("b").unwrap().1[0]
         ));
-        assert!(graphs.3.ancestor(
-            &event_hashes.get("a").unwrap()[2],
-            &event_hashes.get("e").unwrap()[1]
+        assert!(graphs.get("c").unwrap().0.ancestor(
+            &graphs.get("a").unwrap().1[2],
+            &graphs.get("e").unwrap().1[1]
         ));
     }
         
@@ -628,10 +622,10 @@ mod tests {
             .0
             .strongly_see(&event_hashes[6], &event_hashes[0]));
         
-        let (graphs, event_hashes) = generate_from_paper();
-        assert!(graphs.3.strongly_see(
-            &event_hashes.get("c").unwrap()[5],
-            &event_hashes.get("d").unwrap()[0]
+        let graphs = generate_from_paper();
+        assert!(graphs.get("c").unwrap().0.strongly_see(
+            &graphs.get("c").unwrap().1[5],
+            &graphs.get("d").unwrap().1[0]
         ))
     }
 
