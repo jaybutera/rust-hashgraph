@@ -298,17 +298,17 @@ impl<TPayload> Graph<TPayload> {
         }
     }
 
-    fn ancestor(&self, x_hash: &event::Hash, y_hash: &event::Hash) -> bool {
-        let _x = self.all_events.get(x_hash).unwrap();
-        let _y = self.all_events.get(y_hash).unwrap();
+    fn ancestor(&self, target: &event::Hash, potential_ancestor: &event::Hash) -> bool {
+        let _x = self.all_events.get(target).unwrap();
+        let _y = self.all_events.get(potential_ancestor).unwrap();
 
-        self.iter(x_hash).unwrap().any(|e| e.hash() == y_hash)
+        self.iter(target).unwrap().any(|e| e.hash() == potential_ancestor)
     }
 
-    fn strongly_see(&self, x_hash: &event::Hash, y_hash: &event::Hash) -> bool {
+    fn strongly_see(&self, target: &event::Hash, observer: &event::Hash) -> bool {
         let mut creators_seen = self
-            .iter(x_hash).unwrap()
-            .filter(|e| self.ancestor(&e.hash(), y_hash))
+            .iter(target).unwrap()
+            .filter(|e| self.ancestor(&e.hash(), observer))
             .fold(HashSet::new(), |mut set, event| {
                 let creator = event.author();
                 set.insert(creator.clone());
@@ -316,7 +316,7 @@ impl<TPayload> Graph<TPayload> {
             });
 
         // Add self to seen set incase it wasn't traversed above
-        match self.all_events.get(x_hash).unwrap().parents() {
+        match self.all_events.get(target).unwrap().parents() {
             event::Kind::Genesis => true,
             event::Kind::Regular(_) => creators_seen.insert(self.self_id.clone()),
         };
@@ -502,8 +502,8 @@ mod tests {
         let (graph, peers_events) = build_graph2(()).unwrap();
 
         assert!(graph.ancestor(
-            &peers_events[0].events[0],
-            &peers_events[0].events[1]
+            &peers_events[0].events[1],
+            &peers_events[0].events[0]
         ));
 
         
@@ -527,7 +527,7 @@ mod tests {
             &peers_events[1].events[1],
             &peers_events[0].events[0],
         ));
-        assert!(!graph.strongly_see(
+        assert!(graph.strongly_see(
             &peers_events[1].events[2],
             &peers_events[0].events[0],
         ));
@@ -544,7 +544,7 @@ mod tests {
         let (graph, peers_events) = build_graph2(()).unwrap();
 
         assert!(graph.round_index[0].contains(&peers_events[2].events[1]));
-        assert!(graph.round_index[0].contains(&peers_events[1].events[2]));
+        assert!(graph.round_index[1].contains(&peers_events[1].events[2]));
     }
 
     #[test]
