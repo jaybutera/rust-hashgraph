@@ -185,7 +185,7 @@ impl<TPayload> Graph<TPayload> {
             all_events: &self.all_events,
         };
 
-        if let event::Kind::Regular(Parents { self_parent, .. }) = event.parents() {
+        if let event::Kind::Regular(_) = event.parents() {
             e_iter.push_self_parents(event_hash)
         }
         Some(e_iter)
@@ -269,7 +269,7 @@ impl<TPayload> Graph<TPayload> {
 
     /// Determine if the event is famous.
     /// An event is famous if 2/3 future witnesses strongly see it.
-    fn is_famous(&self, event_hash: event::Hash) -> bool {
+    pub fn is_famous(&self, event_hash: event::Hash) -> bool {
         let event = self.all_events.get(&event_hash).unwrap();
 
         match event.parents() {

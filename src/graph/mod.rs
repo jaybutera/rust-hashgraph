@@ -18,17 +18,6 @@ use crate::PeerId;
 
 type NodeIndex<TIndexPayload> = HashMap<event::Hash, TIndexPayload>;
 
-
-struct RoundBorders {
-    peer_round_borders: HashMap<PeerId, SegmentBorders>,
-}
-
-/// Ends of line segments (peer-owned nodes within a round)
-struct SegmentBorders {
-    start_event: event::Hash,
-    end_event: event::Hash,
-}
-
 struct PeerIndexEntry {
     genesis: event::Hash,
     /// Use `add_latest` for insertion
