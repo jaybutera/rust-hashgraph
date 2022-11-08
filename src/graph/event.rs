@@ -4,7 +4,6 @@ use serde_big_array::BigArray;
 
 use crate::PeerId;
 
-
 // smth like H256 ??? (some hash type)
 #[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
 pub struct Hash {
@@ -20,15 +19,15 @@ impl std::fmt::Display for Hash {
 
 impl Hash {
     pub fn into_array(self) -> [u8; 64] {
-        return self.inner
+        return self.inner;
     }
 
     pub fn as_ref(&self) -> &[u8; 64] {
-        return &self.inner
+        return &self.inner;
     }
 
     pub fn from_array(inner: [u8; 64]) -> Self {
-        return Hash {inner}
+        return Hash { inner };
     }
 }
 
@@ -66,7 +65,10 @@ impl<TPayload: Serialize> Event<TPayload> {
     pub fn new(payload: TPayload, event_kind: Kind, author: PeerId) -> bincode::Result<Self> {
         let hash = Self::calculate_hash(&payload, &event_kind, &author)?;
         Ok(Event {
-            children: Children { self_child: None, other_children: vec![] },
+            children: Children {
+                self_child: None,
+                other_children: vec![],
+            },
             id: hash,
             user_payload: payload,
             parents: event_kind,
@@ -74,7 +76,11 @@ impl<TPayload: Serialize> Event<TPayload> {
         })
     }
 
-    fn digest_from_parts(payload: &TPayload, event_kind: &Kind, author: &PeerId) -> bincode::Result<Vec<u8>> {
+    fn digest_from_parts(
+        payload: &TPayload,
+        event_kind: &Kind,
+        author: &PeerId,
+    ) -> bincode::Result<Vec<u8>> {
         let mut v = vec![];
         let payload_bytes = bincode::serialize(&payload)?;
         v.extend(payload_bytes);
@@ -85,7 +91,11 @@ impl<TPayload: Serialize> Event<TPayload> {
         Ok(v)
     }
 
-    fn calculate_hash(payload: &TPayload, event_kind: &Kind, author: &PeerId) -> bincode::Result<Hash> {
+    fn calculate_hash(
+        payload: &TPayload,
+        event_kind: &Kind,
+        author: &PeerId,
+    ) -> bincode::Result<Hash> {
         let mut hasher = Blake2b512::new();
         hasher.update(Self::digest_from_parts(payload, event_kind, author)?);
         let hash_slice = &hasher.finalize()[..];
@@ -127,14 +137,18 @@ mod tests {
 
     fn create_events() -> Result<Vec<Event<i32>>, bincode::Error> {
         let mock_parents = Parents {
-            self_parent: Hash{inner: hex!(
-                "021ced8799296ceca557832ab941a50b4a11f83478cf141f51f933f653ab9fbc
+            self_parent: Hash {
+                inner: hex!(
+                    "021ced8799296ceca557832ab941a50b4a11f83478cf141f51f933f653ab9fbc
                 c05a037cddbed06e309bf334942c4e58cdf1a46e237911ccd7fcf9787cbc7fd0"
-            )},
-            other_parent: Hash{inner: hex!(
-                "a231788464c1d56aab39b098359eb00e2fd12622d85821d8bffe68fdb3044f24
+                ),
+            },
+            other_parent: Hash {
+                inner: hex!(
+                    "a231788464c1d56aab39b098359eb00e2fd12622d85821d8bffe68fdb3044f24
                 370e750986e6e4747f6ec0e051ae3e7d2558f7c4d3c4d5ab57362e572abecb36"
-            )},
+                ),
+            },
         };
         let results = vec![
             Event::new(0, Kind::Genesis, 0)?,

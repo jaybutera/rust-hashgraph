@@ -3,10 +3,9 @@ use serde::Serialize;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::PeerId;
 use super::event::{self, Event, Parents};
-use super::{RoundNum, PeerIndexEntry, PushKind, PushError};
-
+use super::{PeerIndexEntry, PushError, PushKind, RoundNum};
+use crate::PeerId;
 
 type NodeIndex<TIndexPayload> = HashMap<event::Hash, TIndexPayload>;
 
@@ -40,15 +39,15 @@ impl<T: Serialize> Graph<T> {
             round_index: vec![HashSet::new()],
             witnesses: HashMap::new(),
             round_of: HashMap::new(),
-            coin_frequency
+            coin_frequency,
         };
 
-        graph.push_node(genesis_payload, PushKind::Genesis, self_id)
+        graph
+            .push_node(genesis_payload, PushKind::Genesis, self_id)
             .expect("Genesis events should be valid");
         graph
     }
 }
-
 
 impl<TPayload: Serialize> Graph<TPayload> {
     /// Create and push node to the graph, adding it at the end of `author`'s lane
@@ -62,21 +61,28 @@ impl<TPayload: Serialize> Graph<TPayload> {
         // Verification first, no changing state
 
         let new_node = match node_type {
-            PushKind::Genesis => {
-                Event::new(payload, event::Kind::Genesis, author)?
-            }
+            PushKind::Genesis => Event::new(payload, event::Kind::Genesis, author)?,
             PushKind::Regular(other_parent) => {
-                let latest_author_event = &self.peer_index.get(&author)
+                let latest_author_event = &self
+                    .peer_index
+                    .get(&author)
                     .ok_or(PushError::PeerNotFound(author))?
                     .latest_event;
-                Event::new(payload, event::Kind::Regular(Parents { self_parent: latest_author_event.clone(), other_parent }), author)?
+                Event::new(
+                    payload,
+                    event::Kind::Regular(Parents {
+                        self_parent: latest_author_event.clone(),
+                        other_parent,
+                    }),
+                    author,
+                )?
             }
         };
 
         if self.all_events.contains_key(new_node.hash()) {
             return Err(PushError::NodeAlreadyExists(new_node.hash().clone()));
         }
-        
+
         match new_node.parents() {
             event::Kind::Genesis => {
                 if self.peer_index.contains_key(&author) {
@@ -130,9 +136,7 @@ impl<TPayload: Serialize> Graph<TPayload> {
                     .children
                     .other_children
                     .push(new_node.hash().clone());
-                if let Some(_) = author_index
-                    .add_latest(new_node.hash().clone())
-                {
+                if let Some(_) = author_index.add_latest(new_node.hash().clone()) {
                     // TODO: warn
                     panic!()
                 }
@@ -162,7 +166,8 @@ impl<TPayload: Serialize> Graph<TPayload> {
 
         // Set witness status
         if self.determine_witness(&hash) {
-            self.witnesses.insert(hash.clone(), WitnessFamousness::Undecided);
+            self.witnesses
+                .insert(hash.clone(), WitnessFamousness::Undecided);
         }
         Ok(hash)
     }
@@ -174,20 +179,16 @@ impl<TPayload> Graph<TPayload> {
     }
 
     pub fn peer_latest_event(&self, peer: &PeerId) -> Option<&event::Hash> {
-        self.peer_index.get(peer)
-            .map(|e| &e.latest_event)
+        self.peer_index.get(peer).map(|e| &e.latest_event)
     }
 
     pub fn peer_genesis(&self, peer: &PeerId) -> Option<&event::Hash> {
-        self.peer_index.get(peer)
-            .map(|e| &e.genesis)
+        self.peer_index.get(peer).map(|e| &e.genesis)
     }
 
     pub fn event(&self, id: &event::Hash) -> Option<&TPayload> {
-        self.all_events.get(id)
-            .map(|e| e.payload())
+        self.all_events.get(id).map(|e| e.payload())
     }
-
 
     /// Iterator over ancestors of the event
     pub fn iter(&self, event_hash: &event::Hash) -> Option<EventIter<TPayload>> {
@@ -277,12 +278,11 @@ impl<TPayload> Graph<TPayload> {
     pub fn determine_witness(&self, event_hash: &event::Hash) -> bool {
         match self.all_events.get(&event_hash).unwrap().parents() {
             event::Kind::Genesis => true,
-            event::Kind::Regular(Parents{self_parent, .. }) => {
+            event::Kind::Regular(Parents { self_parent, .. }) => {
                 self.round_of(event_hash) > self.round_of(self_parent)
             }
         }
     }
-
 
     pub fn decide_fame_for_witness(&mut self, event_hash: &event::Hash) -> Result<(), NotWitness> {
         let fame = self.is_famous_witness(event_hash)?;
@@ -292,9 +292,12 @@ impl<TPayload> Graph<TPayload> {
 
     /// Determine if the event is famous.
     /// An event is famous if it is a witness and 2/3 of future witnesses strongly see it.
-    /// 
+    ///
     /// None if the event is not witness, otherwise reports famousness
-    pub fn is_famous_witness(&self, event_hash: &event::Hash) -> Result<WitnessFamousness, NotWitness> {
+    pub fn is_famous_witness(
+        &self,
+        event_hash: &event::Hash,
+    ) -> Result<WitnessFamousness, NotWitness> {
         // Event must be a witness
         if !self.determine_witness(event_hash) {
             return Err(NotWitness);
@@ -303,7 +306,7 @@ impl<TPayload> Graph<TPayload> {
         let r = self.round_of(event_hash);
 
         // first round of the election
-        let this_round_index = match self.round_index.get(r+1) {
+        let this_round_index = match self.round_index.get(r + 1) {
             Some(i) => i,
             None => return Ok(WitnessFamousness::Undecided),
         };
@@ -316,30 +319,32 @@ impl<TPayload> Graph<TPayload> {
         // (i.e. need to count members at particular round and not at the end)
         let n = self.members_count();
 
-        let next_rounds_indices = match self.round_index.get(r+2..) {
+        let next_rounds_indices = match self.round_index.get(r + 2..) {
             Some(i) => i,
             None => return Ok(WitnessFamousness::Undecided),
         };
         for (d, this_round_index) in izip!((2..), next_rounds_indices) {
             let mut this_round_votes = HashMap::new();
-            let voter_round = r+d;
+            let voter_round = r + d;
             let round_witnesses = this_round_index
                 .iter()
                 .filter(|e| self.witnesses.contains_key(e));
             for y_hash in round_witnesses {
                 // The set of witness events in round (y.round-1) that y can strongly see
-                let s = self.round_index[voter_round-1].iter()
+                let s = self.round_index[voter_round - 1]
+                    .iter()
                     .filter(|h| self.witnesses.contains_key(h) && self.strongly_see(y_hash, h));
                 // count votes
                 let (votes_for, votes_against) = s.fold((0, 0), |(yes, no), prev_round_witness| {
                     let vote = prev_round_votes.get(prev_round_witness);
                     match vote {
-                        Some(true) => (yes+1, no),
-                        Some(false) => (yes, no+1),
-                        None => { // Should not happen but don't just panic, maybe return error later
+                        Some(true) => (yes + 1, no),
+                        Some(false) => (yes, no + 1),
+                        None => {
+                            // Should not happen but don't just panic, maybe return error later
                             // TODO: warn on inconsistent state
                             (yes, no)
-                        },
+                        }
                     }
                 });
                 // majority vote in s ( is TRUE for a tie )
@@ -349,31 +354,32 @@ impl<TPayload> Graph<TPayload> {
 
                 if d % self.coin_frequency > 0 {
                     // Normal round
-                    if t > (2 * n / 3) { // TODO: move supermajority cond to func
+                    if t > (2 * n / 3) {
+                        // TODO: move supermajority cond to func
                         // if supermajority, then decide
-                        return Ok(WitnessFamousness::Yes)
-                    }
-                    else {
+                        return Ok(WitnessFamousness::Yes);
+                    } else {
                         this_round_votes.insert(y_hash, v);
                     }
-                }
-                else {
+                } else {
                     // Coin round
-                    if t > (2 * n / 3) { // TODO: move supermajority cond to func
+                    if t > (2 * n / 3) {
+                        // TODO: move supermajority cond to func
                         // if supermajority, then vote
                         this_round_votes.insert(y_hash, v);
-                    }
-                    else {
+                    } else {
                         let middle_bit = {
                             // TODO: use actual signature, not sure if makes a diff tho
-                            let y_sig = self.all_events.get(y_hash)
+                            let y_sig = self
+                                .all_events
+                                .get(y_hash)
                                 .expect("Inconsistent graph state") //TODO: turn to error
                                 .hash()
                                 .as_ref();
-                            let middle_bit_index = y_sig.len()*8/2;
-                            let middle_byte_index = middle_bit_index/8;
+                            let middle_bit_index = y_sig.len() * 8 / 2;
+                            let middle_byte_index = middle_bit_index / 8;
                             let middle_byte = y_sig[middle_byte_index];
-                            let middle_bit_index = middle_bit_index%8;
+                            let middle_bit_index = middle_bit_index % 8;
                             (middle_byte >> middle_bit_index & 1) != 0
                         };
                         this_round_votes.insert(y_hash, middle_bit);
@@ -390,24 +396,27 @@ impl<TPayload> Graph<TPayload> {
         let _x = self.all_events.get(target).unwrap();
         let _y = self.all_events.get(potential_ancestor).unwrap();
 
-        self.iter(target).unwrap().any(|e| e.hash() == potential_ancestor)
+        self.iter(target)
+            .unwrap()
+            .any(|e| e.hash() == potential_ancestor)
     }
 
     /// True if y is an ancestor of x, but no fork of y is an ancestor of x
-    /// 
+    ///
     /// Target is ancestor of observer, for reference
     fn see(&self, observer: &event::Hash, target: &event::Hash) -> bool {
         // TODO: add fork check
-        return self.ancestor(observer, target)
+        return self.ancestor(observer, target);
     }
 
     /// Event `observer` strongly sees `target` through more than 2n/3 members.
-    /// 
+    ///
     /// Target is ancestor of observer, for reference
     fn strongly_see(&self, observer: &event::Hash, target: &event::Hash) -> bool {
         // TODO: Check fork conditions
         let mut authors_seen = self
-            .iter(observer).unwrap()
+            .iter(observer)
+            .unwrap()
             .filter(|e| self.ancestor(&e.hash(), target))
             .fold(HashSet::new(), |mut set, event| {
                 let author = event.author();
@@ -425,7 +434,6 @@ impl<TPayload> Graph<TPayload> {
         authors_seen.len() > (2 * n / 3)
     }
 }
-
 
 pub struct EventIter<'a, T> {
     node_list: Vec<&'a Event<T>>,
@@ -472,11 +480,7 @@ mod tests {
         other_parent: event::Hash,
         payload: T,
     ) -> Result<event::Hash, PushError> {
-        graph.push_node(
-            payload,
-            PushKind::Regular(other_parent),
-            author,
-        )
+        graph.push_node(payload, PushKind::Regular(other_parent), author)
     }
 
     struct PeerEvents {
@@ -489,23 +493,50 @@ mod tests {
     /// Add multiple events in the graph (for easier test case creation and
     /// concise and more intuitive writing).
     /// `events` is list of tuples (event_name, author_name, other_parent_name)
-    /// 
+    ///
     /// `other_parent_name` is either `event_name` of one of the previous entries
     /// or name of peer for its genesis
-    fn add_events<T: Serialize + Copy>(graph: &mut Graph<T>, events: &[(&'static str, &'static str, &'static str)], author_ids: HashMap<&'static str, PeerId>, payload: T) -> Result<HashMap<&'static str, PeerEvents>, PushError> {
+    fn add_events<T: Serialize + Copy>(
+        graph: &mut Graph<T>,
+        events: &[(&'static str, &'static str, &'static str)],
+        author_ids: HashMap<&'static str, PeerId>,
+        payload: T,
+    ) -> Result<HashMap<&'static str, PeerEvents>, PushError> {
         let mut inserted_events = HashMap::new();
-        let mut peers_events: HashMap<&str, PeerEvents> = author_ids.keys().map(|name| (*name, PeerEvents{ id: *author_ids.get(name).expect(&format!("Unknown author name '{}'", name)), events: vec![] })).collect();
+        let mut peers_events: HashMap<&str, PeerEvents> = author_ids
+            .keys()
+            .map(|name| {
+                (
+                    *name,
+                    PeerEvents {
+                        id: *author_ids
+                            .get(name)
+                            .expect(&format!("Unknown author name '{}'", name)),
+                        events: vec![],
+                    },
+                )
+            })
+            .collect();
         for (event_name, author, other_parent) in events {
             let other_parent_event_hash = match author_ids.get(other_parent) {
-                Some(h) => graph.peer_genesis(h)
-                    .expect(&format!("Unknown peer id {} to graph (name '{}')", h, author)),
-                None => inserted_events.get(other_parent)
+                Some(h) => graph.peer_genesis(h).expect(&format!(
+                    "Unknown peer id {} to graph (name '{}')",
+                    h, author
+                )),
+                None => inserted_events
+                    .get(other_parent)
                     .expect(&format!("Unknown `other_parent` '{}'", other_parent)),
             };
-            let author_id = author_ids.get(author)
+            let author_id = author_ids
+                .get(author)
                 .expect(&format!("Unknown author name '{}'", author));
-            let new_event_hash = add_event(graph, *author_id, other_parent_event_hash.clone(), payload)?;
-            peers_events.get_mut(author).expect("Just checked presence").events.push(new_event_hash.clone());
+            let new_event_hash =
+                add_event(graph, *author_id, other_parent_event_hash.clone(), payload)?;
+            peers_events
+                .get_mut(author)
+                .expect("Just checked presence")
+                .events
+                .push(new_event_hash.clone());
             let clashed_event = inserted_events.insert(event_name, new_event_hash);
             if clashed_event.is_some() {
                 panic!("Event name clash '{}'", event_name)
@@ -514,7 +545,12 @@ mod tests {
         Ok(peers_events)
     }
 
-    fn add_geneses<T: Serialize + Copy>(graph: &mut Graph<T>, this_author: &str, author_ids: &HashMap<&str, PeerId>, payload: T) -> Result<(), PushError> {
+    fn add_geneses<T: Serialize + Copy>(
+        graph: &mut Graph<T>,
+        this_author: &str,
+        author_ids: &HashMap<&str, PeerId>,
+        payload: T,
+    ) -> Result<(), PushError> {
         for (k, v) in author_ids {
             if *k == this_author {
                 continue;
@@ -524,18 +560,15 @@ mod tests {
         Ok(())
     }
 
-    fn build_graph_from_paper<T: Serialize + Copy>(payload: T, coin_frequency: usize) -> Result<TestCase<T>, PushError> {
-        let author_ids = HashMap::from([
-            ("a", 0),
-            ("b", 1),
-            ("c", 2),
-            ("d", 3),
-            ("e", 4),
-        ]);
+    fn build_graph_from_paper<T: Serialize + Copy>(
+        payload: T,
+        coin_frequency: usize,
+    ) -> Result<TestCase<T>, PushError> {
+        let author_ids = HashMap::from([("a", 0), ("b", 1), ("c", 2), ("d", 3), ("e", 4)]);
         let mut graph = Graph::new(*author_ids.get("a").unwrap(), payload, coin_frequency);
         add_geneses(&mut graph, "a", &author_ids, payload)?;
         let events = [
-        //  (name, peer, other_parent)
+            //  (name, peer, other_parent)
             ("c2", "c", "d"),
             ("e2", "e", "b"),
             ("b2", "b", "c2"),
@@ -548,11 +581,13 @@ mod tests {
             ("c5", "c", "e2"),
             ("c6", "c", "a3"),
         ];
-        add_events(&mut graph, &events, author_ids, payload)
-            .map(|a| (graph, a))
+        add_events(&mut graph, &events, author_ids, payload).map(|a| (graph, a))
     }
 
-    fn build_graph_some_chain<T: Serialize + Copy>(payload: T, coin_frequency: usize) -> Result<TestCase<T>, PushError> {
+    fn build_graph_some_chain<T: Serialize + Copy>(
+        payload: T,
+        coin_frequency: usize,
+    ) -> Result<TestCase<T>, PushError> {
         /* Generates the following graph for each member (c1,c2,c3)
          *
             |  o__|  -- e7
@@ -564,15 +599,11 @@ mod tests {
             o__|  |  -- e1
             o  o  o  -- (g1,g2,g3)
         */
-        let author_ids = HashMap::from([
-            ("g1", 0),
-            ("g2", 1),
-            ("g3", 2),
-        ]);
+        let author_ids = HashMap::from([("g1", 0), ("g2", 1), ("g3", 2)]);
         let mut graph = Graph::new(*author_ids.get("g1").unwrap(), payload, coin_frequency);
         add_geneses(&mut graph, "g1", &author_ids, payload)?;
         let events = [
-        //  (name, peer, other_parent)
+            //  (name, peer, other_parent)
             ("e1", "g1", "g2"),
             ("e2", "g2", "e1"),
             ("e3", "g3", "e2"),
@@ -581,26 +612,23 @@ mod tests {
             ("e6", "g3", "e5"),
             ("e7", "g2", "e6"),
         ];
-        add_events(&mut graph, &events, author_ids, payload)
-            .map(|a| (graph, a))
+        add_events(&mut graph, &events, author_ids, payload).map(|a| (graph, a))
     }
 
-    fn build_graph_detailed_example<T: Serialize + Copy>(payload: T, coin_frequency: usize) -> Result<TestCase<T>, PushError> {
+    fn build_graph_detailed_example<T: Serialize + Copy>(
+        payload: T,
+        coin_frequency: usize,
+    ) -> Result<TestCase<T>, PushError> {
         // Defines graph from paper HASHGRAPH CONSENSUS: DETAILED EXAMPLES
         // https://www.swirlds.com/downloads/SWIRLDS-TR-2016-02.pdf
         // also in resources/graph_example.png
 
-        let author_ids = HashMap::from([
-            ("a", 0),
-            ("b", 1),
-            ("c", 2),
-            ("d", 2),
-        ]);
+        let author_ids = HashMap::from([("a", 0), ("b", 1), ("c", 2), ("d", 2)]);
         let mut graph = Graph::new(*author_ids.get("a").unwrap(), payload, coin_frequency);
         add_geneses(&mut graph, "a", &author_ids, payload)?;
         // resources/graph_example.png for reference
         let events = [
-        //  (name,  peer, other_parent)
+            //  (name,  peer, other_parent)
             // round 1
             ("d1_1", "d", "b"),
             ("b1_1", "b", "d1_1"),
@@ -611,21 +639,21 @@ mod tests {
             ("c1_1", "c", "b1_2"),
             ("b1_3", "b", "d1_3"),
             // round 2
-            ("d2",   "d", "a1_1"),
-            ("a2",   "a", "d2"),
-            ("b2",   "b", "d2"),
+            ("d2", "d", "a1_1"),
+            ("a2", "a", "d2"),
+            ("b2", "b", "d2"),
             ("a2_1", "a", "c1_1"),
-            ("c2",   "c", "a2_1"),
+            ("c2", "c", "a2_1"),
             ("d2_1", "d", "b2"),
             ("a2_2", "a", "b2"),
             ("d2_2", "d", "c"),
             ("b2_1", "b", "a2_2"),
             // round 3
-            ("b3",   "b", "d2_2"),
-            ("a3",   "a", "b3"),
-            ("d3",   "d", "b3"),
+            ("b3", "b", "d2_2"),
+            ("a3", "a", "b3"),
+            ("d3", "d", "b3"),
             ("d3_1", "d", "c2"),
-            ("c3",   "c", "d3_1"),
+            ("c3", "c", "d3_1"),
             ("b3_1", "b", "a3"),
             ("b3_2", "b", "a3"),
             ("a3_1", "a", "b3_2"),
@@ -634,12 +662,10 @@ mod tests {
             ("b3_4", "b", "a3_2"),
             ("d3_2", "d", "b3_3"),
             // round 4
-            ("d4",   "d", "c3"),
-            ("b4",   "b", "d4"),
+            ("d4", "d", "c3"),
+            ("b4", "b", "d4"),
         ];
-        add_events(&mut graph, &events, author_ids, payload)
-            .map(|a| (graph, a))
-
+        add_events(&mut graph, &events, author_ids, payload).map(|a| (graph, a))
     }
 
     // Test simple work + errors
@@ -691,7 +717,6 @@ mod tests {
             &peers.get("g1").unwrap().events[0]
         ));
 
-        
         let (graph, peers) = build_graph_from_paper((), 15).unwrap();
         assert!(graph.ancestor(
             &peers.get("c").unwrap().events[5],
@@ -703,7 +728,7 @@ mod tests {
             &peers.get("e").unwrap().events[1],
         ));
     }
-        
+
     #[test]
     fn test_strongly_see() {
         let (graph, peers) = build_graph_some_chain((), 15).unwrap();
@@ -735,7 +760,7 @@ mod tests {
     #[test]
     fn test_determine_witness() {
         let (graph, peers) = build_graph_some_chain((), 15).unwrap();
-        
+
         assert!(!graph.determine_witness(&peers.get("g3").unwrap().events[1]));
         assert!(graph.determine_witness(&peers.get("g2").unwrap().events[2]));
         assert!(graph.determine_witness(&peers.get("g1").unwrap().events[2]));
@@ -744,7 +769,7 @@ mod tests {
     #[test]
     fn test_is_famous() {
         let (graph, peers) = build_graph_some_chain((), 15).unwrap();
-        
+
         assert_eq!(
             graph.is_famous_witness(&peers.get("g1").unwrap().events[0]),
             Ok(WitnessFamousness::Yes)

@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use std::collections::HashMap;
@@ -8,11 +8,10 @@ pub mod graph;
 
 // u64 must be enough, if new round each 0.1 second
 // then we'll be supplied for >5*10^10 years lol
-//  
+//
 // For 10 round/sec and u32 it's 27 years, so
 // TODO put a warning for such case or drop program.
 type RoundNum = usize;
-
 
 use crate::PeerId;
 
@@ -33,20 +32,23 @@ pub enum PushKind {
     Regular(event::Hash),
 }
 
-
 impl PeerIndexEntry {
     fn new(genesis: event::Hash) -> Self {
         let latest_event = genesis.clone();
-        Self { genesis, authored_events: HashMap::new(), latest_event }
+        Self {
+            genesis,
+            authored_events: HashMap::new(),
+            latest_event,
+        }
     }
 
-    fn add_latest(&mut self, event: event::Hash) -> Option<()>{
+    fn add_latest(&mut self, event: event::Hash) -> Option<()> {
         match self.authored_events.insert(event.clone(), ()) {
             Some(a) => Some(a),
             None => {
                 self.latest_event = event;
                 None
-            },
+            }
         }
     }
 }
@@ -69,5 +71,3 @@ pub enum PushError {
     #[error("Serialization failed")]
     SerializationFailure(#[from] bincode::Error),
 }
-
-
