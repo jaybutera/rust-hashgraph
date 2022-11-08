@@ -654,10 +654,10 @@ mod tests {
     #[test]
     fn duplicate_push_fails() {
         let (mut graph, peers) = build_graph_from_paper((), 15).unwrap();
-        let g1_id = peers.get("g1").unwrap().id;
+        let a_id = peers.get("a").unwrap().id;
         assert!(matches!(
-            graph.push_node((), PushKind::Genesis, g1_id),
-            Err(PushError::NodeAlreadyExists(hash)) if &hash == graph.peer_genesis(&g1_id).unwrap()
+            graph.push_node((), PushKind::Genesis, a_id),
+            Err(PushError::NodeAlreadyExists(hash)) if &hash == graph.peer_genesis(&a_id).unwrap()
         ));
     }
 
