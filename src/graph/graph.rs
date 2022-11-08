@@ -225,10 +225,10 @@ impl<TPayload> Graph<TPayload> {
                 let witnesses_strongly_seen = round
                     .iter()
                     .filter(|e| self.witnesses.contains_key(&e.hash()))
-                    .fold(HashSet::new(), |mut set, e| {
-                        if self.strongly_see(event_hash, &e.hash()) {
-                            let creator = e.author();
-                            set.insert(creator.clone());
+                    .fold(HashSet::new(), |mut set, witness| {
+                        if self.strongly_see(event_hash, &witness.hash()) {
+                            let author = witness.author();
+                            set.insert(author.clone());
                         }
                         set
                     });
@@ -284,14 +284,12 @@ impl<TPayload> Graph<TPayload> {
                     return false;
                 }
 
-                let witnesses = self
-                    .all_events
-                    .values()
-                    .filter(|e| self.witnesses.contains_key(&e.hash()))
+                let witnesses = self.witnesses.keys()
+                    .filter_map(|hash| self.all_events.get(hash))
                     .fold(HashSet::new(), |mut set, e| {
                         if self.strongly_see(&e.hash(), &event_hash) {
-                            let creator = e.author();
-                            set.insert(creator.clone());
+                            let author = e.author();
+                            set.insert(author.clone());
                         }
                         set
                     });
@@ -303,6 +301,7 @@ impl<TPayload> Graph<TPayload> {
     }
 
     fn ancestor(&self, target: &event::Hash, potential_ancestor: &event::Hash) -> bool {
+        // TODO: check in other way and return error???
         let _x = self.all_events.get(target).unwrap();
         let _y = self.all_events.get(potential_ancestor).unwrap();
 
@@ -310,23 +309,23 @@ impl<TPayload> Graph<TPayload> {
     }
 
     fn strongly_see(&self, target: &event::Hash, observer: &event::Hash) -> bool {
-        let mut creators_seen = self
+        let mut authors_seen = self
             .iter(target).unwrap()
             .filter(|e| self.ancestor(&e.hash(), observer))
             .fold(HashSet::new(), |mut set, event| {
-                let creator = event.author();
-                set.insert(creator.clone());
+                let author = event.author();
+                set.insert(author.clone());
                 set
             });
 
         // Add self to seen set incase it wasn't traversed above
         match self.all_events.get(target).unwrap().parents() {
             event::Kind::Genesis => true,
-            event::Kind::Regular(_) => creators_seen.insert(self.self_id.clone()),
+            event::Kind::Regular(_) => authors_seen.insert(self.self_id.clone()),
         };
 
         let n = self.members_count();
-        creators_seen.len() > (2 * n / 3)
+        authors_seen.len() > (2 * n / 3)
     }
 }
 
