@@ -18,11 +18,26 @@ impl std::fmt::Display for Hash {
     }
 }
 
+impl Hash {
+    pub fn into_array(self) -> [u8; 64] {
+        return self.inner
+    }
+
+    pub fn as_ref(&self) -> &[u8; 64] {
+        return &self.inner
+    }
+
+    pub fn from_array(inner: [u8; 64]) -> Self {
+        return Hash {inner}
+    }
+}
+
 pub struct Event<TPayload> {
     // parents are inside `type_specific`, as geneses do not have ones
     pub children: Children,
 
     // Hash of user payload + parents + author data (blockchain-like)
+    // TODO: write why
     id: Hash,
 
     user_payload: TPayload,
