@@ -506,13 +506,16 @@ mod tests {
         let mut peers_events: HashMap<&str, PeerEvents> = author_ids
             .keys()
             .map(|name| {
+                let id = *author_ids
+                    .get(name)
+                    .expect(&format!("Unknown author name '{}'", name));
+                let genesis = graph.peer_genesis(&id)
+                    .expect(&format!("Unknown author id to graph '{}' (name {})", id, name));
                 (
                     *name,
                     PeerEvents {
-                        id: *author_ids
-                            .get(name)
-                            .expect(&format!("Unknown author name '{}'", name)),
-                        events: vec![],
+                        id,
+                        events: vec![genesis.clone()],
                     },
                 )
             })
