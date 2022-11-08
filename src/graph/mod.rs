@@ -9,7 +9,7 @@ pub mod graph;
 // u64 must be enough, if new round each 0.1 second
 // then we'll be supplied for >5*10^10 years lol
 //  
-// For 1 round/sec and u32 it's 27 years, so
+// For 10 round/sec and u32 it's 27 years, so
 // TODO put a warning for such case or drop program.
 type RoundNum = usize;
 

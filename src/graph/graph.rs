@@ -10,13 +10,17 @@ use super::{RoundNum, PeerIndexEntry, PushKind, PushError};
 
 type NodeIndex<TIndexPayload> = HashMap<event::Hash, TIndexPayload>;
 
+struct WitnessEntry{
+    famous: bool
+}
+
 pub struct Graph<TPayload> {
     all_events: NodeIndex<Event<TPayload>>,
     peer_index: HashMap<PeerId, PeerIndexEntry>,
     self_id: PeerId,
     round_index: Vec<HashSet<event::Hash>>,
     /// Some(false) means unfamous witness
-    is_famous: HashMap<event::Hash, bool>,
+    witnesses: HashMap<event::Hash, WitnessEntry>,
     round_of: HashMap<event::Hash, RoundNum>, // Just testing a caching system for now
 }
 
@@ -27,7 +31,7 @@ impl<T: Serialize> Graph<T> {
             peer_index: HashMap::new(),
             self_id,
             round_index: vec![HashSet::new()],
-            is_famous: HashMap::new(),
+            witnesses: HashMap::new(),
             round_of: HashMap::new(),
         };
 
@@ -150,7 +154,7 @@ impl<TPayload: Serialize> Graph<TPayload> {
 
         // Set witness status
         if self.determine_witness(hash.clone()) {
-            self.is_famous.insert(hash.clone(), false);
+            self.witnesses.insert(hash.clone(), WitnessEntry { famous: false });
         }
         Ok(hash)
     }
@@ -220,7 +224,7 @@ impl<TPayload> Graph<TPayload> {
                 // Find out how many witnesses by unique members the event can strongly see
                 let witnesses_strongly_seen = round
                     .iter()
-                    .filter(|e| self.is_famous.get(&e.hash()).is_some())
+                    .filter(|e| self.witnesses.contains_key(&e.hash()))
                     .fold(HashSet::new(), |mut set, e| {
                         if self.strongly_see(event_hash, &e.hash()) {
                             let creator = e.author();
@@ -268,7 +272,7 @@ impl<TPayload> Graph<TPayload> {
     }
 
     /// Determine if the event is famous.
-    /// An event is famous if 2/3 future witnesses strongly see it.
+    /// An event is famous if it is a witness and 2/3 of future witnesses strongly see it.
     pub fn is_famous(&self, event_hash: event::Hash) -> bool {
         let event = self.all_events.get(&event_hash).unwrap();
 
@@ -283,7 +287,7 @@ impl<TPayload> Graph<TPayload> {
                 let witnesses = self
                     .all_events
                     .values()
-                    .filter(|e| self.is_famous.get(&e.hash()).is_some())
+                    .filter(|e| self.witnesses.contains_key(&e.hash()))
                     .fold(HashSet::new(), |mut set, e| {
                         if self.strongly_see(&e.hash(), &event_hash) {
                             let creator = e.author();
