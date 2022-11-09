@@ -946,13 +946,29 @@ mod tests {
 
     #[test]
     fn test_determine_round() {
-        let (graph, peers, _names) = build_graph_some_chain((), 15).unwrap();
-
-        assert!(graph.round_index[0].contains(&peers.get("g3").unwrap().events[1]));
-        assert!(graph.round_index[1].contains(&peers.get("g2").unwrap().events[2]));
-
+        let mut cases = vec![];
+        let (graph, peers, names) = build_graph_some_chain((), 999).unwrap();
+        cases.push(((graph, &peers, names), "build_graph_some_chain", vec![
+            (
+                0,
+                [
+                    &peers.get("g1").unwrap().events[0..2],
+                    &peers.get("g2").unwrap().events[0..3],
+                    &peers.get("g3").unwrap().events[0..2],
+                ].concat()
+            ),
+            (
+                1,
+                [
+                    &peers.get("g1").unwrap().events[2..3],
+                    &peers.get("g2").unwrap().events[3..4],
+                    &peers.get("g3").unwrap().events[2..3],
+                ].concat()
+            ),
+        ]));
         let (graph, peers, names) = build_graph_detailed_example((), 999).unwrap();
-        let cases = [
+        
+        cases.push(((graph, &peers, names), "build_graph_detailed_example", vec![
             (
                 0,
                 [
@@ -974,7 +990,7 @@ mod tests {
                 .concat(),
             ),
             (
-                1,
+                2,
                 [
                     &peers.get("a").unwrap().events[5..8],
                     &peers.get("b").unwrap().events[6..11],
@@ -984,22 +1000,26 @@ mod tests {
                 .concat(),
             ),
             (
-                1,
+                3,
                 [
                     &peers.get("b").unwrap().events[11..12],
                     &peers.get("d").unwrap().events[10..11],
                 ]
                 .concat(),
             ),
-        ];
-        for (round_index_index, events) in cases {
-            for event in events {
-                assert!(
-                    graph.round_index[round_index_index].contains(&event),
-                    "Round {} does not have event {}",
-                    round_index_index + 1,
-                    names.get(&event).unwrap()
-                );
+        ]));
+        for ((graph, _peers, names), graph_name, round_cases) in cases {
+            for (round_index_index, events) in round_cases {
+                for event in events {
+                    assert!(
+                        graph.round_index[round_index_index].contains(&event),
+                        "Round {} of graph {} does not have event {} (calculated round {})",
+                        round_index_index,
+                        graph_name,
+                        names.get(&event).unwrap(),
+                        graph.round_of(&event)
+                    );
+                }
             }
         }
     }
