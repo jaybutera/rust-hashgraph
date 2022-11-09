@@ -31,6 +31,7 @@ impl Hash {
     }
 }
 
+#[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
 pub struct Event<TPayload> {
     // parents are inside `type_specific`, as geneses do not have ones
     pub children: Children,
@@ -44,18 +45,19 @@ pub struct Event<TPayload> {
     author: PeerId,
 }
 
+#[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
 pub struct Children {
     pub self_child: Option<Hash>,
     pub other_children: Vec<Hash>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
 pub struct Parents {
     pub self_parent: Hash,
     pub other_parent: Hash,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
 pub enum Kind {
     Genesis,
     Regular(Parents),

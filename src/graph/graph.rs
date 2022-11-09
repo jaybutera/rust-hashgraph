@@ -191,15 +191,12 @@ impl<TPayload> Graph<TPayload> {
     }
 
     /// Iterator over ancestors of the event
-    pub fn iter(&self, event_hash: &event::Hash) -> Option<EventIter<TPayload>> {
+    pub fn iter<'a>(&'a self, event_hash: &'a event::Hash) -> Option<EventIter<TPayload>> {
         let event = self.all_events.get(event_hash)?;
-        let mut e_iter = EventIter {
-            node_list: vec![],
-            all_events: &self.all_events,
-        };
+        let mut e_iter = EventIter::new(&self.all_events, event_hash);
 
         if let event::Kind::Regular(_) = event.parents() {
-            e_iter.push_self_parents(event_hash)
+            e_iter.push_self_ancestors(event_hash)
         }
         Some(e_iter)
     }
@@ -414,7 +411,7 @@ impl<TPayload> Graph<TPayload> {
     /// Target is ancestor of observer, for reference
     fn strongly_see(&self, observer: &event::Hash, target: &event::Hash) -> bool {
         // TODO: Check fork conditions
-        let mut authors_seen = self
+        let authors_seen = self
             .iter(observer)
             .unwrap()
             .filter(|e| self.see(&e.hash(), target))
@@ -423,13 +420,6 @@ impl<TPayload> Graph<TPayload> {
                 set.insert(author.clone());
                 set
             });
-
-        // Add self to seen set incase it wasn't traversed above
-        match self.all_events.get(observer).unwrap().parents() {
-            event::Kind::Genesis => true,
-            event::Kind::Regular(_) => authors_seen.insert(self.self_id.clone()),
-        };
-
         let n = self.members_count();
         authors_seen.len() > (2 * n / 3)
     }
@@ -438,16 +428,35 @@ impl<TPayload> Graph<TPayload> {
 pub struct EventIter<'a, T> {
     node_list: Vec<&'a Event<T>>,
     all_events: &'a HashMap<event::Hash, Event<T>>,
+    visited_events: HashSet<&'a event::Hash>,
 }
 
 impl<'a, T> EventIter<'a, T> {
-    fn push_self_parents(&mut self, event_hash: &event::Hash) {
+    pub fn new(all_events: &'a HashMap<event::Hash, Event<T>>, ancestors_of: &'a event::Hash) -> Self {
+        let mut iter = EventIter {
+            node_list: vec![],
+            all_events: all_events,
+            visited_events: HashSet::new(),
+        };
+        iter.push_self_ancestors(ancestors_of);
+        iter
+    }
+
+    fn push_self_ancestors(&mut self, event_hash: &'a event::Hash) {
+        if self.visited_events.contains(event_hash) {
+            return
+        }
         let mut event = self.all_events.get(event_hash).unwrap();
 
         loop {
             self.node_list.push(event);
+            self.visited_events.insert(event_hash);
 
             if let event::Kind::Regular(Parents { self_parent, .. }) = event.parents() {
+                if self.visited_events.contains(self_parent) {
+                    // We've already visited all of its self ancestors
+                    break;
+                }
                 event = self.all_events.get(self_parent).unwrap();
             } else {
                 break;
@@ -463,7 +472,7 @@ impl<'a, T> Iterator for EventIter<'a, T> {
         let event = self.node_list.pop()?;
 
         if let event::Kind::Regular(Parents { other_parent, .. }) = event.parents() {
-            self.push_self_parents(other_parent);
+            self.push_self_ancestors(other_parent);
         }
         Some(event)
     }
@@ -806,6 +815,14 @@ mod tests {
                     &peers.get("c").unwrap().events[2],
                     &peers.get("a").unwrap().events[2]
                 ),
+                (
+                    &peers.get("b").unwrap().events[3],
+                    &peers.get("c").unwrap().events[0]
+                ),
+                (
+                    &peers.get("d").unwrap().events[3],
+                    &peers.get("c").unwrap().events[0]
+                ),
             ])
         ];
         for (result, cases) in test_cases {
@@ -819,6 +836,27 @@ mod tests {
                 )
             }
         }
+    }
+
+    #[test]
+    fn test_ancestor_iter() {
+        let (graph, peers, names) = build_graph_detailed_example((), 999).unwrap();
+        let b1_3_ancestor_iter = graph.iter(&peers.get("b").unwrap().events[3]).unwrap();
+        let b1_3_ancestors = HashSet::<_>::from_iter( 
+            [
+                &peers.get("b").unwrap().events[0..4],
+                &peers.get("c").unwrap().events[0..1],
+                &peers.get("d").unwrap().events[0..4],
+            ]
+            .concat().into_iter());
+        let b1_3_ancestors_from_iter = HashSet::<_>::from_iter(
+            b1_3_ancestor_iter.map(|e| e.hash().clone())
+        );
+        assert_eq!(b1_3_ancestors, b1_3_ancestors_from_iter,
+            "Iterator did not find ancestors {:?}\n and it went through excess events: {:?}",
+            b1_3_ancestors.difference(&b1_3_ancestors_from_iter).map(|h| names.get(h).unwrap()),
+            b1_3_ancestors_from_iter.difference(&b1_3_ancestors).map(|h| names.get(h).unwrap())
+        );
     }
 
     #[test]
