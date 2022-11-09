@@ -417,7 +417,7 @@ impl<TPayload> Graph<TPayload> {
         let mut authors_seen = self
             .iter(observer)
             .unwrap()
-            .filter(|e| self.ancestor(&e.hash(), target))
+            .filter(|e| self.see(&e.hash(), target))
             .fold(HashSet::new(), |mut set, event| {
                 let author = event.author();
                 set.insert(author.clone());
@@ -710,7 +710,7 @@ mod tests {
 
     #[test]
     fn duplicate_push_fails() {
-        let (mut graph, peers, names) = build_graph_from_paper((), 15).unwrap();
+        let (mut graph, peers, _names) = build_graph_from_paper((), 15).unwrap();
         let a_id = peers.get("a").unwrap().id;
         assert!(matches!(
             graph.push_node((), PushKind::Genesis, a_id),
@@ -720,7 +720,7 @@ mod tests {
 
     #[test]
     fn double_genesis_fails() {
-        let (mut graph, peers, names) = build_graph_from_paper(0, 15).unwrap();
+        let (mut graph, peers, _names) = build_graph_from_paper(0, 15).unwrap();
         assert!(matches!(
             graph.push_node(1, PushKind::Genesis, peers.get("a").unwrap().id),
             Err(PushError::GenesisAlreadyExists)
@@ -729,7 +729,7 @@ mod tests {
 
     #[test]
     fn missing_parent_fails() {
-        let (mut graph, peers, names) = build_graph_from_paper((), 15).unwrap();
+        let (mut graph, peers, _names) = build_graph_from_paper((), 15).unwrap();
         let fake_node = Event::new((), event::Kind::Genesis, 1232423).unwrap();
         assert!(matches!(
             add_event(&mut graph, peers.get("a").unwrap().id, fake_node.hash().clone(), ()),
@@ -741,14 +741,14 @@ mod tests {
 
     #[test]
     fn test_ancestor() {
-        let (graph, peers, names) = build_graph_some_chain((), 15).unwrap();
+        let (graph, peers, _names) = build_graph_some_chain((), 15).unwrap();
 
         assert!(graph.ancestor(
             &peers.get("g1").unwrap().events[1],
             &peers.get("g1").unwrap().events[0]
         ));
 
-        let (graph, peers, names) = build_graph_from_paper((), 15).unwrap();
+        let (graph, peers, _names) = build_graph_from_paper((), 15).unwrap();
         assert!(graph.ancestor(
             &peers.get("c").unwrap().events[5],
             &peers.get("b").unwrap().events[0],
@@ -758,11 +758,72 @@ mod tests {
             &peers.get("a").unwrap().events[2],
             &peers.get("e").unwrap().events[1],
         ));
+
+        let (graph, peers, names) = build_graph_detailed_example((), 999).unwrap();
+        let test_cases = [
+            (false, 
+            vec![
+                (
+                    &peers.get("c").unwrap().events[0],
+                    &peers.get("c").unwrap().events[1]
+                ),
+                (
+                    &peers.get("c").unwrap().events[0],
+                    &peers.get("c").unwrap().events[3]
+                ),
+                (
+                    &peers.get("c").unwrap().events[0],
+                    &peers.get("b").unwrap().events[2]
+                ),
+                (
+                    &peers.get("c").unwrap().events[1],
+                    &peers.get("d").unwrap().events[3]
+                ),
+                (
+                    &peers.get("a").unwrap().events[2],
+                    &peers.get("c").unwrap().events[1]
+                ),
+            ]),
+            (true,
+            vec![
+                ( // Self parent
+                    &peers.get("d").unwrap().events[1],
+                    &peers.get("d").unwrap().events[0]
+                ),
+                ( // Self ancestor
+                    &peers.get("d").unwrap().events[4],
+                    &peers.get("d").unwrap().events[0]
+                ),
+                ( // Ancestry is reflective
+                    &peers.get("c").unwrap().events[1],
+                    &peers.get("c").unwrap().events[1]
+                ),
+                ( // Other parent
+                    &peers.get("b").unwrap().events[3],
+                    &peers.get("d").unwrap().events[3]
+                ),
+                (
+                    &peers.get("c").unwrap().events[2],
+                    &peers.get("a").unwrap().events[2]
+                ),
+            ])
+        ];
+        for (result, cases) in test_cases {
+            for (e1, e2) in cases {
+                let actual_result = graph.ancestor(e1, e2);
+                let (e1_name, e2_name) = (names.get(e1).unwrap(), names.get(e2).unwrap());
+                assert_eq!(
+                    result, actual_result,
+                    "expected ancestor({},{}) to be {}, but it is {}.",
+                    e1_name, e2_name, result, actual_result
+                )
+            }
+        }
     }
 
     #[test]
     fn test_strongly_see() {
-        let (graph, peers, names) = build_graph_some_chain((), 15).unwrap();
+        let (graph, peers, _names) = build_graph_some_chain((), 15).unwrap();
 
         assert!(!graph.strongly_see(
             &peers.get("g1").unwrap().events[1],
@@ -773,16 +834,81 @@ mod tests {
             &peers.get("g1").unwrap().events[0],
         ));
 
-        let (graph, peers, names) = build_graph_from_paper((), 15).unwrap();
+        let (graph, peers, _names) = build_graph_from_paper((), 15).unwrap();
         assert!(graph.strongly_see(
             &peers.get("c").unwrap().events[5],
             &peers.get("d").unwrap().events[0],
-        ))
+        ));
+
+        let (graph, peers, names) = build_graph_detailed_example((), 999).unwrap();
+        let test_cases = [
+            (false, 
+            vec![
+                (
+                    &peers.get("d").unwrap().events[0],
+                    &peers.get("d").unwrap().events[0]
+                ),
+                (
+                    &peers.get("d").unwrap().events[3],
+                    &peers.get("d").unwrap().events[0]
+                ),
+                (
+                    &peers.get("d").unwrap().events[3],
+                    &peers.get("b").unwrap().events[0]
+                ),
+                (
+                    &peers.get("b").unwrap().events[2],
+                    &peers.get("c").unwrap().events[0]
+                ),
+                (
+                    &peers.get("a").unwrap().events[0],
+                    &peers.get("b").unwrap().events[0]
+                ),
+                (
+                    &peers.get("a").unwrap().events[1],
+                    &peers.get("c").unwrap().events[0]
+                ),
+            ]),
+            (true,
+            vec![
+                (
+                    &peers.get("d").unwrap().events[4],
+                    &peers.get("d").unwrap().events[0]
+                ),
+                (
+                    &peers.get("d").unwrap().events[4],
+                    &peers.get("b").unwrap().events[0]
+                ),
+                (
+                    &peers.get("b").unwrap().events[3],
+                    &peers.get("c").unwrap().events[0]
+                ),
+                (
+                    &peers.get("a").unwrap().events[1],
+                    &peers.get("b").unwrap().events[0]
+                ),
+                (
+                    &peers.get("a").unwrap().events[3],
+                    &peers.get("c").unwrap().events[0]
+                ),
+            ])
+        ];
+        for (result, cases) in test_cases {
+            for (e1, e2) in cases {
+                let (e1_name, e2_name) = (names.get(e1).unwrap(), names.get(e2).unwrap());
+                let actual_result = graph.strongly_see(e1, e2);
+                assert_eq!(
+                    result, actual_result,
+                    "expected strongly_see({},{}) to be {}, but it is {}.",
+                    e1_name, e2_name, result, actual_result
+                )
+            }
+        }
     }
 
     #[test]
     fn test_determine_round() {
-        let (graph, peers, names) = build_graph_some_chain((), 15).unwrap();
+        let (graph, peers, _names) = build_graph_some_chain((), 15).unwrap();
 
         assert!(graph.round_index[0].contains(&peers.get("g3").unwrap().events[1]));
         assert!(graph.round_index[1].contains(&peers.get("g2").unwrap().events[2]));
@@ -842,7 +968,7 @@ mod tests {
 
     #[test]
     fn test_determine_witness() {
-        let (graph, peers, names) = build_graph_some_chain((), 15).unwrap();
+        let (graph, peers, _names) = build_graph_some_chain((), 15).unwrap();
 
         assert!(!graph.determine_witness(&peers.get("g3").unwrap().events[1]));
         assert!(graph.determine_witness(&peers.get("g2").unwrap().events[2]));
@@ -851,7 +977,7 @@ mod tests {
 
     #[test]
     fn test_is_famous() {
-        let (graph, peers, names) = build_graph_some_chain((), 15).unwrap();
+        let (graph, peers, _names) = build_graph_some_chain((), 15).unwrap();
 
         assert_eq!(
             graph.is_famous_witness(&peers.get("g1").unwrap().events[0]),
