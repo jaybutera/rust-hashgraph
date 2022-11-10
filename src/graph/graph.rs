@@ -1070,12 +1070,12 @@ mod tests {
     }
 
     #[test]
-    fn test_is_famous() {
+    fn test_is_famous_witness() {
         let (graph, peers, _names) = build_graph_some_chain((), 15).unwrap();
 
         assert_eq!(
             graph.is_famous_witness(&peers.get("g1").unwrap().events[0]),
-            Ok(WitnessFamousness::Yes)
+            Ok(WitnessFamousness::Undecided)
         );
         assert_eq!(
             graph.is_famous_witness(&peers.get("g1").unwrap().events[1]),
