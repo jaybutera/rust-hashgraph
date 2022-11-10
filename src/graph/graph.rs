@@ -432,7 +432,10 @@ pub struct EventIter<'a, T> {
 }
 
 impl<'a, T> EventIter<'a, T> {
-    pub fn new(all_events: &'a HashMap<event::Hash, Event<T>>, ancestors_of: &'a event::Hash) -> Self {
+    pub fn new(
+        all_events: &'a HashMap<event::Hash, Event<T>>,
+        ancestors_of: &'a event::Hash,
+    ) -> Self {
         let mut iter = EventIter {
             node_list: vec![],
             all_events: all_events,
@@ -444,7 +447,7 @@ impl<'a, T> EventIter<'a, T> {
 
     fn push_self_ancestors(&mut self, event_hash: &'a event::Hash) {
         if self.visited_events.contains(event_hash) {
-            return
+            return;
         }
         let mut event = self.all_events.get(event_hash).unwrap();
 
@@ -770,72 +773,83 @@ mod tests {
 
         let (graph, peers, names) = build_graph_detailed_example((), 999).unwrap();
         let test_cases = [
-            (false, 
-            vec![
-                (
-                    &peers.get("c").unwrap().events[0],
-                    &peers.get("c").unwrap().events[1]
-                ),
-                (
-                    &peers.get("c").unwrap().events[0],
-                    &peers.get("c").unwrap().events[3]
-                ),
-                (
-                    &peers.get("c").unwrap().events[0],
-                    &peers.get("b").unwrap().events[2]
-                ),
-                (
-                    &peers.get("c").unwrap().events[1],
-                    &peers.get("d").unwrap().events[3]
-                ),
-                (
-                    &peers.get("a").unwrap().events[2],
-                    &peers.get("c").unwrap().events[1]
-                ),
-            ]),
-            (true,
-            vec![
-                ( // Self parent
-                    &peers.get("d").unwrap().events[1],
-                    &peers.get("d").unwrap().events[0]
-                ),
-                ( // Self ancestor
-                    &peers.get("d").unwrap().events[4],
-                    &peers.get("d").unwrap().events[0]
-                ),
-                ( // Ancestry is reflective
-                    &peers.get("c").unwrap().events[1],
-                    &peers.get("c").unwrap().events[1]
-                ),
-                ( // Other parent
-                    &peers.get("b").unwrap().events[3],
-                    &peers.get("d").unwrap().events[3]
-                ),
-                (
-                    &peers.get("c").unwrap().events[2],
-                    &peers.get("a").unwrap().events[2]
-                ),
-                (
-                    &peers.get("b").unwrap().events[3],
-                    &peers.get("c").unwrap().events[0]
-                ),
-                (
-                    &peers.get("d").unwrap().events[3],
-                    &peers.get("c").unwrap().events[0]
-                ),
-                ( // Debugging b2 not being witness
-                    &peers.get("d").unwrap().events[6],
-                    &peers.get("a").unwrap().events[2]
-                ),
-                ( // Debugging b2 not being witness
-                    &peers.get("b").unwrap().events[6],
-                    &peers.get("a").unwrap().events[2]
-                ),
-                ( // Debugging b2 not being witness
-                    &peers.get("a").unwrap().events[4],
-                    &peers.get("a").unwrap().events[2]
-                ),
-            ])
+            (
+                false,
+                vec![
+                    (
+                        &peers.get("c").unwrap().events[0],
+                        &peers.get("c").unwrap().events[1],
+                    ),
+                    (
+                        &peers.get("c").unwrap().events[0],
+                        &peers.get("c").unwrap().events[3],
+                    ),
+                    (
+                        &peers.get("c").unwrap().events[0],
+                        &peers.get("b").unwrap().events[2],
+                    ),
+                    (
+                        &peers.get("c").unwrap().events[1],
+                        &peers.get("d").unwrap().events[3],
+                    ),
+                    (
+                        &peers.get("a").unwrap().events[2],
+                        &peers.get("c").unwrap().events[1],
+                    ),
+                ],
+            ),
+            (
+                true,
+                vec![
+                    (
+                        // Self parent
+                        &peers.get("d").unwrap().events[1],
+                        &peers.get("d").unwrap().events[0],
+                    ),
+                    (
+                        // Self ancestor
+                        &peers.get("d").unwrap().events[4],
+                        &peers.get("d").unwrap().events[0],
+                    ),
+                    (
+                        // Ancestry is reflective
+                        &peers.get("c").unwrap().events[1],
+                        &peers.get("c").unwrap().events[1],
+                    ),
+                    (
+                        // Other parent
+                        &peers.get("b").unwrap().events[3],
+                        &peers.get("d").unwrap().events[3],
+                    ),
+                    (
+                        &peers.get("c").unwrap().events[2],
+                        &peers.get("a").unwrap().events[2],
+                    ),
+                    (
+                        &peers.get("b").unwrap().events[3],
+                        &peers.get("c").unwrap().events[0],
+                    ),
+                    (
+                        &peers.get("d").unwrap().events[3],
+                        &peers.get("c").unwrap().events[0],
+                    ),
+                    (
+                        // Debugging b2 not being witness
+                        &peers.get("d").unwrap().events[6],
+                        &peers.get("a").unwrap().events[2],
+                    ),
+                    (
+                        // Debugging b2 not being witness
+                        &peers.get("b").unwrap().events[6],
+                        &peers.get("a").unwrap().events[2],
+                    ),
+                    (
+                        // Debugging b2 not being witness
+                        &peers.get("a").unwrap().events[4],
+                        &peers.get("a").unwrap().events[2],
+                    ),
+                ],
+            ),
         ];
         for (result, cases) in test_cases {
             for (e1, e2) in cases {
@@ -857,36 +871,45 @@ mod tests {
         let cases = vec![
             (
                 graph.iter(&peers.get("b").unwrap().events[3]).unwrap(),
-                HashSet::<_>::from_iter( 
+                HashSet::<_>::from_iter(
                     [
                         &peers.get("b").unwrap().events[0..4],
                         &peers.get("c").unwrap().events[0..1],
                         &peers.get("d").unwrap().events[0..4],
                     ]
-                    .concat().into_iter()
-                )
+                    .concat()
+                    .into_iter(),
+                ),
             ),
-            ( // debugging b3 not being witness
+            (
+                // debugging b3 not being witness
                 graph.iter(&peers.get("b").unwrap().events[6]).unwrap(),
-                HashSet::<_>::from_iter( 
+                HashSet::<_>::from_iter(
                     [
                         &peers.get("a").unwrap().events[0..5],
                         &peers.get("b").unwrap().events[0..7],
                         &peers.get("c").unwrap().events[0..2],
                         &peers.get("d").unwrap().events[0..7],
                     ]
-                    .concat().into_iter()
-                )
+                    .concat()
+                    .into_iter(),
+                ),
             ),
         ];
         for (iter, ancestors) in cases {
-            let ancestors_from_iter = HashSet::<_>::from_iter(
-                iter.map(|e| e.hash().clone())
-            );
-            assert_eq!(ancestors, ancestors_from_iter,
+            let ancestors_from_iter = HashSet::<_>::from_iter(iter.map(|e| e.hash().clone()));
+            assert_eq!(
+                ancestors,
+                ancestors_from_iter,
                 "Iterator did not find ancestors {:?}\n and it went through excess events: {:?}",
-                ancestors.difference(&ancestors_from_iter).map(|h| names.get(h).unwrap()).collect::<Vec<_>>(),
-                ancestors_from_iter.difference(&ancestors).map(|h| names.get(h).unwrap()).collect::<Vec<_>>()
+                ancestors
+                    .difference(&ancestors_from_iter)
+                    .map(|h| names.get(h).unwrap())
+                    .collect::<Vec<_>>(),
+                ancestors_from_iter
+                    .difference(&ancestors)
+                    .map(|h| names.get(h).unwrap())
+                    .collect::<Vec<_>>()
             );
         }
     }
@@ -912,60 +935,65 @@ mod tests {
 
         let (graph, peers, names) = build_graph_detailed_example((), 999).unwrap();
         let test_cases = [
-            (false, 
-            vec![
-                (
-                    &peers.get("d").unwrap().events[0],
-                    &peers.get("d").unwrap().events[0]
-                ),
-                (
-                    &peers.get("d").unwrap().events[3],
-                    &peers.get("d").unwrap().events[0]
-                ),
-                (
-                    &peers.get("d").unwrap().events[3],
-                    &peers.get("b").unwrap().events[0]
-                ),
-                (
-                    &peers.get("b").unwrap().events[2],
-                    &peers.get("c").unwrap().events[0]
-                ),
-                (
-                    &peers.get("a").unwrap().events[0],
-                    &peers.get("b").unwrap().events[0]
-                ),
-                (
-                    &peers.get("a").unwrap().events[1],
-                    &peers.get("c").unwrap().events[0]
-                ),
-            ]),
-            (true,
-            vec![
-                (
-                    &peers.get("d").unwrap().events[4],
-                    &peers.get("d").unwrap().events[0]
-                ),
-                (
-                    &peers.get("d").unwrap().events[4],
-                    &peers.get("b").unwrap().events[0]
-                ),
-                (
-                    &peers.get("b").unwrap().events[3],
-                    &peers.get("c").unwrap().events[0]
-                ),
-                (
-                    &peers.get("a").unwrap().events[1],
-                    &peers.get("b").unwrap().events[0]
-                ),
-                (
-                    &peers.get("a").unwrap().events[3],
-                    &peers.get("c").unwrap().events[0]
-                ),
-                ( // Did not find for round calculation once
-                    &peers.get("b").unwrap().events[6],
-                    &peers.get("a").unwrap().events[2]
-                ),
-            ])
+            (
+                false,
+                vec![
+                    (
+                        &peers.get("d").unwrap().events[0],
+                        &peers.get("d").unwrap().events[0],
+                    ),
+                    (
+                        &peers.get("d").unwrap().events[3],
+                        &peers.get("d").unwrap().events[0],
+                    ),
+                    (
+                        &peers.get("d").unwrap().events[3],
+                        &peers.get("b").unwrap().events[0],
+                    ),
+                    (
+                        &peers.get("b").unwrap().events[2],
+                        &peers.get("c").unwrap().events[0],
+                    ),
+                    (
+                        &peers.get("a").unwrap().events[0],
+                        &peers.get("b").unwrap().events[0],
+                    ),
+                    (
+                        &peers.get("a").unwrap().events[1],
+                        &peers.get("c").unwrap().events[0],
+                    ),
+                ],
+            ),
+            (
+                true,
+                vec![
+                    (
+                        &peers.get("d").unwrap().events[4],
+                        &peers.get("d").unwrap().events[0],
+                    ),
+                    (
+                        &peers.get("d").unwrap().events[4],
+                        &peers.get("b").unwrap().events[0],
+                    ),
+                    (
+                        &peers.get("b").unwrap().events[3],
+                        &peers.get("c").unwrap().events[0],
+                    ),
+                    (
+                        &peers.get("a").unwrap().events[1],
+                        &peers.get("b").unwrap().events[0],
+                    ),
+                    (
+                        &peers.get("a").unwrap().events[3],
+                        &peers.get("c").unwrap().events[0],
+                    ),
+                    (
+                        // Did not find for round calculation once
+                        &peers.get("b").unwrap().events[6],
+                        &peers.get("a").unwrap().events[2],
+                    ),
+                ],
+            ),
         ];
         for (result, cases) in test_cases {
             for (e1, e2) in cases {
@@ -984,66 +1012,76 @@ mod tests {
     fn test_determine_round() {
         let mut cases = vec![];
         let (graph, peers, names) = build_graph_some_chain((), 999).unwrap();
-        cases.push(((graph, &peers, names), "build_graph_some_chain", vec![
-            (
-                0,
-                [
-                    &peers.get("g1").unwrap().events[0..2],
-                    &peers.get("g2").unwrap().events[0..3],
-                    &peers.get("g3").unwrap().events[0..2],
-                ].concat()
-            ),
-            (
-                1,
-                [
-                    &peers.get("g1").unwrap().events[2..3],
-                    &peers.get("g2").unwrap().events[3..4],
-                    &peers.get("g3").unwrap().events[2..3],
-                ].concat()
-            ),
-        ]));
+        cases.push((
+            (graph, &peers, names),
+            "build_graph_some_chain",
+            vec![
+                (
+                    0,
+                    [
+                        &peers.get("g1").unwrap().events[0..2],
+                        &peers.get("g2").unwrap().events[0..3],
+                        &peers.get("g3").unwrap().events[0..2],
+                    ]
+                    .concat(),
+                ),
+                (
+                    1,
+                    [
+                        &peers.get("g1").unwrap().events[2..3],
+                        &peers.get("g2").unwrap().events[3..4],
+                        &peers.get("g3").unwrap().events[2..3],
+                    ]
+                    .concat(),
+                ),
+            ],
+        ));
         let (graph, peers, names) = build_graph_detailed_example((), 999).unwrap();
-        
-        cases.push(((graph, &peers, names), "build_graph_detailed_example", vec![
-            (
-                0,
-                [
-                    &peers.get("a").unwrap().events[0..2],
-                    &peers.get("b").unwrap().events[0..4],
-                    &peers.get("c").unwrap().events[0..2],
-                    &peers.get("d").unwrap().events[0..4],
-                ]
-                .concat(),
-            ),
-            (
-                1,
-                [
-                    &peers.get("a").unwrap().events[2..5],
-                    &peers.get("b").unwrap().events[4..6],
-                    &peers.get("c").unwrap().events[2..3],
-                    &peers.get("d").unwrap().events[4..7],
-                ]
-                .concat(),
-            ),
-            (
-                2,
-                [
-                    &peers.get("a").unwrap().events[5..8],
-                    &peers.get("b").unwrap().events[6..11],
-                    &peers.get("c").unwrap().events[3..4],
-                    &peers.get("d").unwrap().events[7..10],
-                ]
-                .concat(),
-            ),
-            (
-                3,
-                [
-                    &peers.get("b").unwrap().events[11..12],
-                    &peers.get("d").unwrap().events[10..11],
-                ]
-                .concat(),
-            ),
-        ]));
+
+        cases.push((
+            (graph, &peers, names),
+            "build_graph_detailed_example",
+            vec![
+                (
+                    0,
+                    [
+                        &peers.get("a").unwrap().events[0..2],
+                        &peers.get("b").unwrap().events[0..4],
+                        &peers.get("c").unwrap().events[0..2],
+                        &peers.get("d").unwrap().events[0..4],
+                    ]
+                    .concat(),
+                ),
+                (
+                    1,
+                    [
+                        &peers.get("a").unwrap().events[2..5],
+                        &peers.get("b").unwrap().events[4..6],
+                        &peers.get("c").unwrap().events[2..3],
+                        &peers.get("d").unwrap().events[4..7],
+                    ]
+                    .concat(),
+                ),
+                (
+                    2,
+                    [
+                        &peers.get("a").unwrap().events[5..8],
+                        &peers.get("b").unwrap().events[6..11],
+                        &peers.get("c").unwrap().events[3..4],
+                        &peers.get("d").unwrap().events[7..10],
+                    ]
+                    .concat(),
+                ),
+                (
+                    3,
+                    [
+                        &peers.get("b").unwrap().events[11..12],
+                        &peers.get("d").unwrap().events[10..11],
+                    ]
+                    .concat(),
+                ),
+            ],
+        ));
         for ((graph, _peers, names), graph_name, round_cases) in cases {
             for (round_index_index, events) in round_cases {
                 for event in events {
