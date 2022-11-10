@@ -485,14 +485,66 @@ impl<'a, T> Iterator for EventIter<'a, T> {
 mod tests {
     use super::*;
 
-    // for more concise tests
-    fn add_event<T: Serialize>(
-        graph: &mut Graph<T>,
-        author: PeerId,
-        other_parent: event::Hash,
-        payload: T,
-    ) -> Result<event::Hash, PushError> {
-        graph.push_node(payload, PushKind::Regular(other_parent), author)
+    /// # Description
+    /// Test a property of a graph according to test cases.
+    /// 
+    /// The macro requires the name of property (for logging in case of failure),
+    /// function to test, and function for human readable name lookup (details
+    /// see in [`test_cases`]).
+    /// 
+    /// Also you should specify identifier for hashmap of events by each peer
+    /// that can be used in cases declaration. See examples for more clarity
+    /// 
+    /// # Usage
+    /// 
+    /// Upon calling the macro, first specify property name, function to test, and
+    /// lookup. Then list test cases for each graph.
+    /// 
+    /// ## Examples
+    /// 
+    /// ```no_run
+    /// run_tests!(
+    ///     "fame",
+    ///     |g, event| g.is_famous_witness(&event),
+    ///     |event, names| names.get(event).unwrap().to_owned(),
+    ///     peers,
+    ///     (
+    ///         build_graph_some_chain((), 999).unwrap(),
+    ///         vec![
+    ///             (
+    ///                 Ok(WitnessFamousness::Undecided),
+    ///                 vec![
+    ///                     peers.get("g1").unwrap().events[0].clone(),
+    ///                     peers.get("g1").unwrap().events[2].clone(),
+    ///                     peers.get("g2").unwrap().events[0].clone(),
+    ///                     peers.get("g2").unwrap().events[3].clone(),
+    ///                     peers.get("g3").unwrap().events[0].clone(),
+    ///                     peers.get("g3").unwrap().events[2].clone(),
+    ///                 ],
+    ///             ),
+    ///             (
+    ///                 Err(NotWitness),
+    ///                 [
+    ///                     &peers.get("g1").unwrap().events[1..2],
+    ///                     &peers.get("g2").unwrap().events[1..3],
+    ///                     &peers.get("g3").unwrap().events[1..2],
+    ///                 ]
+    ///                 .concat(),
+    ///             ),
+    ///         ]
+    ///     )
+    /// );
+    /// ```
+    macro_rules! run_tests {
+        ( $property_name:expr, $tested_function:expr, $name_lookup:expr, $peers_literal:ident, $(($graph:expr, $cases:expr)),* ) => {
+            let mut cases = vec![];
+            $(
+                let (_graph, $peers_literal, _names, _graph_name) = $graph;
+                let graph_cases = ($cases);
+                cases.push(((_graph, $peers_literal, _names, _graph_name), graph_cases));
+            )*
+            test_cases(cases, $property_name, $tested_function, $name_lookup);
+        };
     }
 
     struct PeerEvents {
@@ -500,16 +552,68 @@ mod tests {
         events: Vec<event::Hash>,
     }
 
-    // Graph, Events by each peer, Test event names (for easier reading)
-    type TestCase<T> = (
+    // Graph, Events by each peer, Test event names (for easier reading), Graph name
+    type TestGraph<T> = (
         Graph<T>,
         HashMap<String, PeerEvents>,  // For getting hashes for events
         HashMap<event::Hash, String>, // For lookup of readable name
         String,                       // Name of the test case
     );
 
+    /// # Description
+    /// Run tests on multiple cases, compare the results, and report if needed.
+    /// 
+    /// # Arguments
+    /// * `cases`: List of test cases. Each list entry consists of graph (with
+    /// helper data structures, see [`TestGraph`](TestGraph<T>)) and test cases
+    /// for the graph. The graph cases are grouped by result expected. For each
+    /// result there is a list of arguments to be supplied to `tested_function`.
+    /// 
+    /// * `tested_function_name`: name of the function, used for assert messages.
+    /// 
+    /// * `tested_function`: function to test, takes 2 arguments: graph itself and
+    /// argument specified in each test case.
+    /// 
+    /// * `name_lookup`: function for obtaining event name based on corresponding
+    /// `HashMap` and argument of the test case, used for better readable assert messages.
+    /// 
+    /// # Example
+    /// 
+    /// Suppose we want to check correctness of round calculation:
+    /// ```no_run
+    /// 
+    /// let mut cases = vec![];
+    /// let (graph, peers, names, graph_name) = build_graph_some_chain((), 999).unwrap();
+    /// let graph_cases = vec![
+    ///     (
+    ///         0,
+    ///         [
+    ///             &peers.get("g1").unwrap().events[0..2],
+    ///             &peers.get("g2").unwrap().events[0..3],
+    ///             &peers.get("g3").unwrap().events[0..2],
+    ///         ]
+    ///         .concat(),
+    ///     ),
+    ///     (
+    ///         1,
+    ///         [
+    ///             &peers.get("g1").unwrap().events[2..3],
+    ///             &peers.get("g2").unwrap().events[3..4],
+    ///             &peers.get("g3").unwrap().events[2..3],
+    ///         ]
+    ///         .concat(),
+    ///     ),
+    /// ];
+    /// cases.push(((graph, peers, names, graph_name), graph_cases));
+    /// test_cases(
+    ///     cases,
+    ///     "round",
+    ///     |g, args| g.round_of(&args),
+    ///     |event, names| names.get(event).unwrap().to_owned(),
+    /// );
+    /// ```
     fn test_cases<TPayload, TArg, TResult, F, FNameLookup>(
-        cases: Vec<(TestCase<TPayload>, Vec<(TResult, Vec<TArg>)>)>,
+        cases: Vec<(TestGraph<TPayload>, Vec<(TResult, Vec<TArg>)>)>,
         tested_function_name: &str,
         tested_function: F,
         name_lookup: FNameLookup,
@@ -590,7 +694,7 @@ mod tests {
                 .get(author)
                 .expect(&format!("Unknown author name '{}'", author));
             let new_event_hash =
-                add_event(graph, *author_id, other_parent_event_hash.clone(), payload)?;
+                graph.push_node(payload, PushKind::Regular(other_parent_event_hash.clone()), *author_id)?;
             let author = author.to_owned();
             peers_events
                 .get_mut(&author)
@@ -631,7 +735,7 @@ mod tests {
     fn build_graph_from_paper<T: Serialize + Copy>(
         payload: T,
         coin_frequency: usize,
-    ) -> Result<TestCase<T>, PushError> {
+    ) -> Result<TestGraph<T>, PushError> {
         let author_ids = HashMap::from([("a", 0), ("b", 1), ("c", 2), ("d", 3), ("e", 4)]);
         let mut graph = Graph::new(*author_ids.get("a").unwrap(), payload, coin_frequency);
         let mut names = add_geneses(&mut graph, "a", &author_ids, payload)?;
@@ -657,7 +761,7 @@ mod tests {
     fn build_graph_some_chain<T: Serialize + Copy>(
         payload: T,
         coin_frequency: usize,
-    ) -> Result<TestCase<T>, PushError> {
+    ) -> Result<TestGraph<T>, PushError> {
         /* Generates the following graph for each member (c1,c2,c3)
          *
             |  o__|  -- e7
@@ -690,7 +794,7 @@ mod tests {
     fn build_graph_detailed_example<T: Serialize + Copy>(
         payload: T,
         coin_frequency: usize,
-    ) -> Result<TestCase<T>, PushError> {
+    ) -> Result<TestGraph<T>, PushError> {
         // Defines graph from paper HASHGRAPH CONSENSUS: DETAILED EXAMPLES
         // https://www.swirlds.com/downloads/SWIRLDS-TR-2016-02.pdf
         // also in resources/graph_example.png
@@ -780,7 +884,7 @@ mod tests {
         let (mut graph, peers, _names, _graph_name) = build_graph_from_paper((), 999).unwrap();
         let fake_node = Event::new((), event::Kind::Genesis, 1232423).unwrap();
         assert!(matches!(
-            add_event(&mut graph, peers.get("a").unwrap().id, fake_node.hash().clone(), ()),
+            graph.push_node((), PushKind::Regular(fake_node.hash().clone()), peers.get("a").unwrap().id),
             Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_node.hash()
         ))
     }
@@ -1046,76 +1150,77 @@ mod tests {
 
     #[test]
     fn test_determine_round() {
-        let mut cases = vec![];
-        let (graph, peers, names, graph_name) = build_graph_some_chain((), 999).unwrap();
-        let graph_cases = vec![
-            (
-                0,
-                [
-                    &peers.get("g1").unwrap().events[0..2],
-                    &peers.get("g2").unwrap().events[0..3],
-                    &peers.get("g3").unwrap().events[0..2],
-                ]
-                .concat(),
-            ),
-            (
-                1,
-                [
-                    &peers.get("g1").unwrap().events[2..3],
-                    &peers.get("g2").unwrap().events[3..4],
-                    &peers.get("g3").unwrap().events[2..3],
-                ]
-                .concat(),
-            ),
-        ];
-        cases.push(((graph, peers, names, graph_name), graph_cases));
-        let (graph, peers, names, graph_name) = build_graph_detailed_example((), 999).unwrap();
-        let graph_cases = vec![
-            (
-                0usize,
-                [
-                    &peers.get("a").unwrap().events[0..2],
-                    &peers.get("b").unwrap().events[0..4],
-                    &peers.get("c").unwrap().events[0..2],
-                    &peers.get("d").unwrap().events[0..4],
-                ]
-                .concat(),
-            ),
-            (
-                1,
-                [
-                    &peers.get("a").unwrap().events[2..5],
-                    &peers.get("b").unwrap().events[4..6],
-                    &peers.get("c").unwrap().events[2..3],
-                    &peers.get("d").unwrap().events[4..7],
-                ]
-                .concat(),
-            ),
-            (
-                2,
-                [
-                    &peers.get("a").unwrap().events[5..8],
-                    &peers.get("b").unwrap().events[6..11],
-                    &peers.get("c").unwrap().events[3..4],
-                    &peers.get("d").unwrap().events[7..10],
-                ]
-                .concat(),
-            ),
-            (
-                3,
-                [
-                    &peers.get("b").unwrap().events[11..12],
-                    &peers.get("d").unwrap().events[10..11],
-                ]
-                .concat(),
-            ),
-        ];
-        cases.push(((graph, peers, names, graph_name), graph_cases));
-        test_cases(
-            cases,
+        run_tests!(
             "round",
             |g, args| g.round_of(&args),
             |event, names| names.get(event).unwrap().to_owned(),
+            peers,
+            (
+                build_graph_some_chain((), 999).unwrap(),
+                vec![
+                    (
+                        0,
+                        [
+                            &peers.get("g1").unwrap().events[0..2],
+                            &peers.get("g2").unwrap().events[0..3],
+                            &peers.get("g3").unwrap().events[0..2],
+                        ]
+                        .concat(),
+                    ),
+                    (
+                        1,
+                        [
+                            &peers.get("g1").unwrap().events[2..3],
+                            &peers.get("g2").unwrap().events[3..4],
+                            &peers.get("g3").unwrap().events[2..3],
+                        ]
+                        .concat(),
+                    ),
+                ]
+            ),
+            (
+                build_graph_detailed_example((), 999).unwrap(),
+                vec![
+                    (
+                        0usize,
+                        [
+                            &peers.get("a").unwrap().events[0..2],
+                            &peers.get("b").unwrap().events[0..4],
+                            &peers.get("c").unwrap().events[0..2],
+                            &peers.get("d").unwrap().events[0..4],
+                        ]
+                        .concat(),
+                    ),
+                    (
+                        1,
+                        [
+                            &peers.get("a").unwrap().events[2..5],
+                            &peers.get("b").unwrap().events[4..6],
+                            &peers.get("c").unwrap().events[2..3],
+                            &peers.get("d").unwrap().events[4..7],
+                        ]
+                        .concat(),
+                    ),
+                    (
+                        2,
+                        [
+                            &peers.get("a").unwrap().events[5..8],
+                            &peers.get("b").unwrap().events[6..11],
+                            &peers.get("c").unwrap().events[3..4],
+                            &peers.get("d").unwrap().events[7..10],
+                        ]
+                        .concat(),
+                    ),
+                    (
+                        3,
+                        [
+                            &peers.get("b").unwrap().events[11..12],
+                            &peers.get("d").unwrap().events[10..11],
+                        ]
+                        .concat(),
+                    ),
+                ]
+            )
         );
     }
 
@@ -1130,37 +1235,36 @@ mod tests {
 
     #[test]
     fn test_is_famous_witness() {
-        let mut cases = vec![];
-        let (graph, peers, names, graph_name) = build_graph_some_chain((), 999).unwrap();
-        let graph_cases = vec![
-            (
-                Ok(WitnessFamousness::Undecided),
-                vec![
-                    peers.get("g1").unwrap().events[0].clone(),
-                    peers.get("g1").unwrap().events[2].clone(),
-                    peers.get("g2").unwrap().events[0].clone(),
-                    peers.get("g2").unwrap().events[3].clone(),
-                    peers.get("g3").unwrap().events[0].clone(),
-                    peers.get("g3").unwrap().events[2].clone(),
-                ],
-            ),
-            (
-                Err(NotWitness),
-                [
-                    &peers.get("g1").unwrap().events[1..2],
-                    &peers.get("g2").unwrap().events[1..3],
-                    &peers.get("g3").unwrap().events[1..2],
-                ]
-                .concat(),
-            ),
-        ];
-        cases.push(((graph, peers, names, graph_name), graph_cases));
-
-        test_cases(
-            cases,
+        run_tests!(
             "fame",
             |g, event| g.is_famous_witness(&event),
             |event, names| names.get(event).unwrap().to_owned(),
+            peers,
+            (
+                build_graph_some_chain((), 999).unwrap(),
+                vec![
+                    (
+                        Ok(WitnessFamousness::Undecided),
+                        vec![
+                            peers.get("g1").unwrap().events[0].clone(),
+                            peers.get("g1").unwrap().events[2].clone(),
+                            peers.get("g2").unwrap().events[0].clone(),
+                            peers.get("g2").unwrap().events[3].clone(),
+                            peers.get("g3").unwrap().events[0].clone(),
+                            peers.get("g3").unwrap().events[2].clone(),
+                        ],
+                    ),
+                    (
+                        Err(NotWitness),
+                        [
+                            &peers.get("g1").unwrap().events[1..2],
+                            &peers.get("g2").unwrap().events[1..3],
+                            &peers.get("g3").unwrap().events[1..2],
+                        ]
+                        .concat(),
+                    ),
+                ]
+            )
         );
     }
 }
