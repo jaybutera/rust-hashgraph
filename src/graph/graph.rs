@@ -684,7 +684,7 @@ mod tests {
             ("c2", "c", "a2_1"),
             ("d2_1", "d", "b2"),
             ("a2_2", "a", "b2"),
-            ("d2_2", "d", "c"),
+            ("d2_2", "d", "a2_2"),
             ("b2_1", "b", "a2_2"),
             // round 3
             ("b3", "b", "d2_2"),
@@ -823,6 +823,18 @@ mod tests {
                     &peers.get("d").unwrap().events[3],
                     &peers.get("c").unwrap().events[0]
                 ),
+                ( // Debugging b2 not being witness
+                    &peers.get("d").unwrap().events[6],
+                    &peers.get("a").unwrap().events[2]
+                ),
+                ( // Debugging b2 not being witness
+                    &peers.get("b").unwrap().events[6],
+                    &peers.get("a").unwrap().events[2]
+                ),
+                ( // Debugging b2 not being witness
+                    &peers.get("a").unwrap().events[4],
+                    &peers.get("a").unwrap().events[2]
+                ),
             ])
         ];
         for (result, cases) in test_cases {
@@ -841,22 +853,42 @@ mod tests {
     #[test]
     fn test_ancestor_iter() {
         let (graph, peers, names) = build_graph_detailed_example((), 999).unwrap();
-        let b1_3_ancestor_iter = graph.iter(&peers.get("b").unwrap().events[3]).unwrap();
-        let b1_3_ancestors = HashSet::<_>::from_iter( 
-            [
-                &peers.get("b").unwrap().events[0..4],
-                &peers.get("c").unwrap().events[0..1],
-                &peers.get("d").unwrap().events[0..4],
-            ]
-            .concat().into_iter());
-        let b1_3_ancestors_from_iter = HashSet::<_>::from_iter(
-            b1_3_ancestor_iter.map(|e| e.hash().clone())
-        );
-        assert_eq!(b1_3_ancestors, b1_3_ancestors_from_iter,
-            "Iterator did not find ancestors {:?}\n and it went through excess events: {:?}",
-            b1_3_ancestors.difference(&b1_3_ancestors_from_iter).map(|h| names.get(h).unwrap()),
-            b1_3_ancestors_from_iter.difference(&b1_3_ancestors).map(|h| names.get(h).unwrap())
-        );
+        // (Iterator, Actual ancestors to compare with)
+        let cases = vec![
+            (
+                graph.iter(&peers.get("b").unwrap().events[3]).unwrap(),
+                HashSet::<_>::from_iter( 
+                    [
+                        &peers.get("b").unwrap().events[0..4],
+                        &peers.get("c").unwrap().events[0..1],
+                        &peers.get("d").unwrap().events[0..4],
+                    ]
+                    .concat().into_iter()
+                )
+            ),
+            ( // debugging b3 not being witness
+                graph.iter(&peers.get("b").unwrap().events[6]).unwrap(),
+                HashSet::<_>::from_iter( 
+                    [
+                        &peers.get("a").unwrap().events[0..5],
+                        &peers.get("b").unwrap().events[0..7],
+                        &peers.get("c").unwrap().events[0..2],
+                        &peers.get("d").unwrap().events[0..7],
+                    ]
+                    .concat().into_iter()
+                )
+            ),
+        ];
+        for (iter, ancestors) in cases {
+            let ancestors_from_iter = HashSet::<_>::from_iter(
+                iter.map(|e| e.hash().clone())
+            );
+            assert_eq!(ancestors, ancestors_from_iter,
+                "Iterator did not find ancestors {:?}\n and it went through excess events: {:?}",
+                ancestors.difference(&ancestors_from_iter).map(|h| names.get(h).unwrap()).collect::<Vec<_>>(),
+                ancestors_from_iter.difference(&ancestors).map(|h| names.get(h).unwrap()).collect::<Vec<_>>()
+            );
+        }
     }
 
     #[test]
@@ -928,6 +960,10 @@ mod tests {
                 (
                     &peers.get("a").unwrap().events[3],
                     &peers.get("c").unwrap().events[0]
+                ),
+                ( // Did not find for round calculation once
+                    &peers.get("b").unwrap().events[6],
+                    &peers.get("a").unwrap().events[2]
                 ),
             ])
         ];
