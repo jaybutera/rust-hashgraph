@@ -531,7 +531,7 @@ mod tests {
     ///     ]
     /// );
     /// ```
-    /// 
+    ///
     /// example of tests used for graph
     /// ```no_run
     /// run_tests!(
@@ -988,7 +988,6 @@ mod tests {
 
     #[test]
     fn test_ancestor() {
-
         run_tests!(
             tested_function_name => "ancestor",
             tested_function => |g, (e1, e2)| g.ancestor(&e1, &e2),
@@ -1342,7 +1341,7 @@ mod tests {
     }
 
     #[test]
-    fn test_determine_witness() {   
+    fn test_determine_witness() {
         run_tests!(
             tested_function_name => "determine_witness",
             tested_function => |graph, event| graph.determine_witness(&event),
@@ -1370,6 +1369,32 @@ mod tests {
                             &peers.get("g1").unwrap().events[2],
                             &peers.get("g2").unwrap().events[3],
                             &peers.get("g3").unwrap().events[2]
+                        ],
+                    )
+                ),
+                (
+                    setup => build_graph_from_paper((), 999).unwrap(),
+                    test_case => (
+                        expect: false,
+                        arguments: vec![
+                            &peers.get("a").unwrap().events[1..],
+                            &peers.get("b").unwrap().events[1..],
+                            &peers.get("c").unwrap().events[1..5],
+                            &peers.get("d").unwrap().events[1..],
+                            &peers.get("e").unwrap().events[1..]
+                        ].iter()
+                            .flat_map(|s| s.iter().collect::<Vec<&_>>())
+                            .collect()
+                    ),
+                    test_case => (
+                        expect: true,
+                        arguments: vec![
+                            &peers.get("a").unwrap().events[0],
+                            &peers.get("b").unwrap().events[0],
+                            &peers.get("c").unwrap().events[0],
+                            &peers.get("c").unwrap().events[5],
+                            &peers.get("d").unwrap().events[0],
+                            &peers.get("e").unwrap().events[0]
                         ],
                     )
                 ),
