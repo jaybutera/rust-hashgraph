@@ -354,7 +354,11 @@ impl<TPayload> Graph<TPayload> {
                     if t > (2 * n / 3) {
                         // TODO: move supermajority cond to func
                         // if supermajority, then decide
-                        return Ok(WitnessFamousness::Yes);
+                        let fame = match v {
+                            true => WitnessFamousness::Yes,
+                            false => WitnessFamousness::No,
+                        };
+                        return Ok(fame);
                     } else {
                         this_round_votes.insert(y_hash, v);
                     }
@@ -1481,12 +1485,12 @@ mod tests {
                     test_case => (
                         expect: Ok(WitnessFamousness::Undecided),
                         arguments: vec![
-                            peers.get("g1").unwrap().events[0].clone(),
-                            peers.get("g1").unwrap().events[2].clone(),
-                            peers.get("g2").unwrap().events[0].clone(),
-                            peers.get("g2").unwrap().events[3].clone(),
-                            peers.get("g3").unwrap().events[0].clone(),
-                            peers.get("g3").unwrap().events[2].clone(),
+                            &peers.get("g1").unwrap().events[0],
+                            &peers.get("g1").unwrap().events[2],
+                            &peers.get("g2").unwrap().events[0],
+                            &peers.get("g2").unwrap().events[3],
+                            &peers.get("g3").unwrap().events[0],
+                            &peers.get("g3").unwrap().events[2],
                         ],
                     ),
                     test_case => (
@@ -1495,8 +1499,84 @@ mod tests {
                             &peers.get("g1").unwrap().events[1..2],
                             &peers.get("g2").unwrap().events[1..3],
                             &peers.get("g3").unwrap().events[1..2],
-                        ]
-                        .concat(),
+                        ].iter()
+                            .flat_map(|s| s.iter().collect::<Vec<&_>>())
+                            .collect(),
+                    ),
+                ),
+                (
+                    setup => build_graph_from_paper((), 999).unwrap(),
+                    test_case => (
+                        expect: Ok(WitnessFamousness::Undecided),
+                        arguments: vec![
+                            &peers.get("a").unwrap().events[0],
+                            &peers.get("b").unwrap().events[0],
+                            &peers.get("c").unwrap().events[0],
+                            &peers.get("c").unwrap().events[5],
+                            &peers.get("d").unwrap().events[0],
+                            &peers.get("e").unwrap().events[0]
+                        ],
+                    ),
+                    test_case => (
+                        expect: Err(NotWitness),
+                        arguments: vec![
+                            &peers.get("a").unwrap().events[1..],
+                            &peers.get("b").unwrap().events[1..],
+                            &peers.get("c").unwrap().events[1..5],
+                            &peers.get("d").unwrap().events[1..],
+                            &peers.get("e").unwrap().events[1..]
+                        ].iter()
+                            .flat_map(|s| s.iter().collect::<Vec<&_>>())
+                            .collect(),
+                    ),
+                ),
+                (
+                    setup => build_graph_detailed_example((), 999).unwrap(),
+                    test_case => (
+                        expect: Ok(WitnessFamousness::Yes),
+                        arguments: vec![
+                            &peers.get("a").unwrap().events[0],
+                            &peers.get("a").unwrap().events[2],
+                            &peers.get("b").unwrap().events[0],
+                            &peers.get("b").unwrap().events[4],
+                            &peers.get("c").unwrap().events[0],
+                            &peers.get("d").unwrap().events[0],
+                            &peers.get("d").unwrap().events[4],
+                        ],
+                    ),
+                    test_case => (
+                        expect: Ok(WitnessFamousness::No),
+                        arguments: vec![
+                            &peers.get("c").unwrap().events[2],
+                        ],
+                    ),
+                    test_case => (
+                        expect: Ok(WitnessFamousness::Undecided),
+                        arguments: vec![
+                            &peers.get("a").unwrap().events[5],
+                            &peers.get("b").unwrap().events[6],
+                            &peers.get("b").unwrap().events[11],
+                            &peers.get("c").unwrap().events[3],
+                            &peers.get("d").unwrap().events[7],
+                            &peers.get("d").unwrap().events[10]
+                        ],
+                    ),
+                    test_case => (
+                        expect: Err(NotWitness),
+                        arguments: [
+                            &peers.get("a").unwrap().events[1..2],
+                            &peers.get("a").unwrap().events[3..5],
+                            &peers.get("a").unwrap().events[6..8],
+                            &peers.get("b").unwrap().events[1..4],
+                            &peers.get("b").unwrap().events[5..6],
+                            &peers.get("b").unwrap().events[7..11],
+                            &peers.get("c").unwrap().events[1..2],
+                            &peers.get("d").unwrap().events[1..4],
+                            &peers.get("d").unwrap().events[5..7],
+                            &peers.get("d").unwrap().events[8..10]
+                        ].iter()
+                            .flat_map(|s| s.iter().collect::<Vec<&_>>())
+                            .collect(),
                     ),
                 )
             ]
