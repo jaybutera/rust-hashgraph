@@ -1192,10 +1192,16 @@ mod tests {
                 (
                     setup => build_graph_from_paper((), 999).unwrap(),
                     test_case => (
-                        // (false, vec![]),
                         expect: true,
                         arguments: vec![(
                             &peers.get("c").unwrap().events[5],
+                            &peers.get("d").unwrap().events[0]
+                        ),]
+                    ),
+                    test_case => (
+                        expect: false,
+                        arguments: vec![(
+                            &peers.get("c").unwrap().events[4],
                             &peers.get("d").unwrap().events[0]
                         ),]
                     )
@@ -1291,6 +1297,27 @@ mod tests {
                             &peers.get("g1").unwrap().events[2..3],
                             &peers.get("g2").unwrap().events[3..4],
                             &peers.get("g3").unwrap().events[2..3],
+                        ]
+                        .concat()
+                    )
+                ),
+                (
+                    setup => build_graph_from_paper((), 999).unwrap(),
+                    test_case => (
+                        expect: 0,
+                        arguments: [
+                            &peers.get("a").unwrap().events[1..],
+                            &peers.get("b").unwrap().events[1..],
+                            &peers.get("c").unwrap().events[1..5],
+                            &peers.get("d").unwrap().events[1..],
+                            &peers.get("e").unwrap().events[1..]
+                        ]
+                        .concat()
+                    ),
+                    test_case => (
+                        expect: 1,
+                        arguments: [
+                            &peers.get("c").unwrap().events[5..],
                         ]
                         .concat()
                     )
