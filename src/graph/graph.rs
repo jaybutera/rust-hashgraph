@@ -841,7 +841,7 @@ mod tests {
          *
             |  o__|  -- e7
             |__|__o  -- e6
-            o__|  |  -- e5
+            o__|  |  -- e5 ~ new round
             |  o__|  -- e4
             |  |__o  -- e3
             |__o  |  -- e2
@@ -1342,7 +1342,7 @@ mod tests {
     }
 
     #[test]
-    fn test_determine_witness() {
+    fn test_determine_witness() {   
         run_tests!(
             tested_function_name => "determine_witness",
             tested_function => |graph, event| graph.determine_witness(&event),
@@ -1354,14 +1354,61 @@ mod tests {
                     test_case => (
                         expect: false,
                         arguments: vec![
-                            &peers.get("g3").unwrap().events[1],
-                        ]
+                            &peers.get("g1").unwrap().events[1..2],
+                            &peers.get("g2").unwrap().events[1..3],
+                            &peers.get("g3").unwrap().events[1..2]
+                        ].iter()
+                            .flat_map(|s| s.iter().collect::<Vec<&_>>())
+                            .collect()
                     ),
                     test_case => (
                         expect: true,
                         arguments: vec![
-                            &peers.get("g2").unwrap().events[2],
-                            &peers.get("g1").unwrap().events[2]
+                            &peers.get("g1").unwrap().events[0],
+                            &peers.get("g2").unwrap().events[0],
+                            &peers.get("g3").unwrap().events[0],
+                            &peers.get("g1").unwrap().events[2],
+                            &peers.get("g2").unwrap().events[3],
+                            &peers.get("g3").unwrap().events[2]
+                        ],
+                    )
+                ),
+                (
+                    setup => build_graph_detailed_example((), 999).unwrap(),
+                    test_case => (
+                        expect: false,
+                        arguments: [
+                            &peers.get("a").unwrap().events[1..2],
+                            &peers.get("a").unwrap().events[3..5],
+                            &peers.get("a").unwrap().events[6..8],
+                            &peers.get("b").unwrap().events[1..4],
+                            &peers.get("b").unwrap().events[5..6],
+                            &peers.get("b").unwrap().events[7..11],
+                            &peers.get("c").unwrap().events[1..2],
+                            &peers.get("d").unwrap().events[1..4],
+                            &peers.get("d").unwrap().events[5..7],
+                            &peers.get("d").unwrap().events[8..10]
+                        ].iter()
+                            .flat_map(|s| s.iter().collect::<Vec<&_>>())
+                            .collect()
+                    ),
+                    test_case => (
+                        expect: true,
+                        arguments: vec![
+                            &peers.get("a").unwrap().events[0],
+                            &peers.get("a").unwrap().events[2],
+                            &peers.get("a").unwrap().events[5],
+                            &peers.get("b").unwrap().events[0],
+                            &peers.get("b").unwrap().events[4],
+                            &peers.get("b").unwrap().events[6],
+                            &peers.get("b").unwrap().events[11],
+                            &peers.get("c").unwrap().events[0],
+                            &peers.get("c").unwrap().events[2],
+                            &peers.get("c").unwrap().events[3],
+                            &peers.get("d").unwrap().events[0],
+                            &peers.get("d").unwrap().events[4],
+                            &peers.get("d").unwrap().events[7],
+                            &peers.get("d").unwrap().events[10]
                         ],
                     )
                 ),
