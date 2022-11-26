@@ -487,6 +487,8 @@ impl<TPayload> Graph<TPayload> {
             .get(event_hash)
             .ok_or(WitnessCheckError::Unknown(UnknownEvent))?
             .author();
+
+        // Events created by the same author in the same round
         let same_creator_round_index = round_index.iter().filter(|hash| {
             let other_author = self
                 .all_events
@@ -495,8 +497,10 @@ impl<TPayload> Graph<TPayload> {
                 .author();
             other_author == author
         });
+
+        // Fame of /events created by the same author in the same round/ (except for this event)
         let same_creator_round_fame: Vec<_> = same_creator_round_index
-            .map(|hash| self.is_famous_witness(hash))
+            .filter_map(|hash| (hash != event_hash).then(|| self.is_famous_witness(hash)))
             .collect();
 
         // If some events in the round are undecided, wait for them
@@ -820,7 +824,7 @@ mod tests {
                     assert_eq!(
                         result,
                         expected_result,
-                        "Event(-s) {} of graph {} expected {} {:?}, but got {:?}",
+                        "Event(-s) '{}' of graph '{}' expected '{}' to be {:?}, but got {:?}",
                         name_lookup(&names, &case),
                         setup_name,
                         tested_function_name,
@@ -1672,6 +1676,117 @@ mod tests {
                     ),
                     test_case => (
                         expect: Ok(WitnessFamousness::Undecided),
+                        arguments: vec![
+                            &peers.get("a").unwrap().events[5],
+                            &peers.get("b").unwrap().events[6],
+                            &peers.get("b").unwrap().events[11],
+                            &peers.get("c").unwrap().events[3],
+                            &peers.get("d").unwrap().events[7],
+                            &peers.get("d").unwrap().events[10]
+                        ],
+                    ),
+                    test_case => (
+                        expect: Err(WitnessCheckError::NotWitness),
+                        arguments: [
+                            &peers.get("a").unwrap().events[1..2],
+                            &peers.get("a").unwrap().events[3..5],
+                            &peers.get("a").unwrap().events[6..8],
+                            &peers.get("b").unwrap().events[1..4],
+                            &peers.get("b").unwrap().events[5..6],
+                            &peers.get("b").unwrap().events[7..11],
+                            &peers.get("c").unwrap().events[1..2],
+                            &peers.get("d").unwrap().events[1..4],
+                            &peers.get("d").unwrap().events[5..7],
+                            &peers.get("d").unwrap().events[8..10]
+                        ].iter()
+                            .flat_map(|s| s.iter().collect::<Vec<&_>>())
+                            .collect(),
+                    ),
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn test_is_unique_famous_witness() {
+        run_tests!(
+            tested_function_name => "uniqueness + fame",
+            tested_function => |g, event| g.is_unique_famous_witness(&event),
+            name_lookup => |names, event| names.get(event).unwrap().to_owned(),
+            peers_literal => peers,
+            tests => [
+                (
+                    setup => build_graph_some_chain((), 999).unwrap(),
+                    test_case => (
+                        expect: Ok(WitnessUniqueFamousness::Undecided),
+                        arguments: vec![
+                            &peers.get("g1").unwrap().events[0],
+                            &peers.get("g1").unwrap().events[2],
+                            &peers.get("g2").unwrap().events[0],
+                            &peers.get("g2").unwrap().events[3],
+                            &peers.get("g3").unwrap().events[0],
+                            &peers.get("g3").unwrap().events[2],
+                        ],
+                    ),
+                    test_case => (
+                        expect: Err(WitnessCheckError::NotWitness),
+                        arguments: [
+                            &peers.get("g1").unwrap().events[1..2],
+                            &peers.get("g2").unwrap().events[1..3],
+                            &peers.get("g3").unwrap().events[1..2],
+                        ].iter()
+                            .flat_map(|s| s.iter().collect::<Vec<&_>>())
+                            .collect(),
+                    ),
+                ),
+                (
+                    setup => build_graph_from_paper((), 999).unwrap(),
+                    test_case => (
+                        expect: Ok(WitnessUniqueFamousness::Undecided),
+                        arguments: vec![
+                            &peers.get("a").unwrap().events[0],
+                            &peers.get("b").unwrap().events[0],
+                            &peers.get("c").unwrap().events[0],
+                            &peers.get("c").unwrap().events[5],
+                            &peers.get("d").unwrap().events[0],
+                            &peers.get("e").unwrap().events[0]
+                        ],
+                    ),
+                    test_case => (
+                        expect: Err(WitnessCheckError::NotWitness),
+                        arguments: vec![
+                            &peers.get("a").unwrap().events[1..],
+                            &peers.get("b").unwrap().events[1..],
+                            &peers.get("c").unwrap().events[1..5],
+                            &peers.get("d").unwrap().events[1..],
+                            &peers.get("e").unwrap().events[1..]
+                        ].iter()
+                            .flat_map(|s| s.iter().collect::<Vec<&_>>())
+                            .collect(),
+                    ),
+                ),
+                (
+                    setup => build_graph_detailed_example((), 999).unwrap(),
+                    test_case => (
+                        expect: Ok(WitnessUniqueFamousness::FamousUnique),
+                        arguments: vec![
+                            &peers.get("a").unwrap().events[0],
+                            &peers.get("a").unwrap().events[2],
+                            &peers.get("b").unwrap().events[0],
+                            &peers.get("b").unwrap().events[4],
+                            &peers.get("c").unwrap().events[0],
+                            &peers.get("d").unwrap().events[0],
+                            &peers.get("d").unwrap().events[4],
+                        ],
+                    ),
+                    test_case => (
+                        expect: Ok(WitnessUniqueFamousness::NotFamous),
+                        arguments: vec![
+                            &peers.get("c").unwrap().events[2],
+                        ],
+                    ),
+                    test_case => (
+                        expect: Ok(WitnessUniqueFamousness::Undecided),
                         arguments: vec![
                             &peers.get("a").unwrap().events[5],
                             &peers.get("b").unwrap().events[6],
