@@ -488,19 +488,19 @@ impl<TPayload> Graph<TPayload> {
             .ok_or(WitnessCheckError::Unknown(UnknownEvent))?
             .author();
 
-        // Events created by the same author in the same round
+        // Events created by the same author in the same round (except for this event)
         let same_creator_round_index = round_index.iter().filter(|hash| {
             let other_author = self
                 .all_events
                 .get(hash)
                 .expect("Inconsistent graph state")
                 .author();
-            other_author == author
+            other_author == author && hash != &event_hash
         });
 
-        // Fame of /events created by the same author in the same round/ (except for this event)
+        // Fame of /events created by the same author in the same round (except for this event)/
         let same_creator_round_fame: Vec<_> = same_creator_round_index
-            .filter_map(|hash| (hash != event_hash).then(|| self.is_famous_witness(hash)))
+            .map(|hash| self.is_famous_witness(hash))
             .collect();
 
         // If some events in the round are undecided, wait for them
