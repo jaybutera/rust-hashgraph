@@ -1,5 +1,6 @@
 use itertools::izip;
 use serde::Serialize;
+use thiserror::Error;
 
 use std::collections::{HashMap, HashSet};
 
@@ -9,12 +10,70 @@ use crate::PeerId;
 
 type NodeIndex<TIndexPayload> = HashMap<event::Hash, TIndexPayload>;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum WitnessFamousness {
-    Undecided,
     Yes,
     No,
+    Undecided,
 }
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum WitnessUniqueFamousness {
+    FamousUnique,
+    FamousNotUnique,
+    NotFamous,
+    Undecided,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct UniquenessNotProvided;
+
+impl TryFrom<WitnessFamousness> for WitnessUniqueFamousness {
+    type Error = UniquenessNotProvided;
+
+    fn try_from(value: WitnessFamousness) -> Result<Self, Self::Error> {
+        match value {
+            WitnessFamousness::Yes => Err(UniquenessNotProvided),
+            WitnessFamousness::No => Ok(WitnessUniqueFamousness::NotFamous),
+            WitnessFamousness::Undecided => Ok(WitnessUniqueFamousness::Undecided),
+        }
+    }
+}
+
+impl WitnessUniqueFamousness {
+    fn from_famousness(value: WitnessFamousness, unique: bool) -> Self {
+        match (value, unique) {
+            (WitnessFamousness::Yes, true) => WitnessUniqueFamousness::FamousUnique,
+            (WitnessFamousness::Yes, false) => WitnessUniqueFamousness::FamousNotUnique,
+            (WitnessFamousness::No, _) => WitnessUniqueFamousness::NotFamous,
+            (WitnessFamousness::Undecided, _) => WitnessUniqueFamousness::Undecided,
+        }
+    }
+}
+
+impl From<WitnessUniqueFamousness> for WitnessFamousness {
+    fn from(value: WitnessUniqueFamousness) -> Self {
+        match value {
+            WitnessUniqueFamousness::FamousUnique | WitnessUniqueFamousness::FamousNotUnique => {
+                WitnessFamousness::Yes
+            }
+            WitnessUniqueFamousness::NotFamous => WitnessFamousness::No,
+            WitnessUniqueFamousness::Undecided => WitnessFamousness::Undecided,
+        }
+    }
+}
+
+#[derive(Error, Debug, PartialEq)]
+pub enum WitnessCheckError {
+    #[error("This event is not a witness")]
+    NotWitness,
+    #[error(transparent)]
+    Unknown(#[from] UnknownEvent),
+}
+
+#[derive(Error, Debug, PartialEq)]
+#[error("Event with such hash is unknown to the graph")]
+pub struct UnknownEvent;
 
 pub struct Graph<TPayload> {
     all_events: NodeIndex<Event<TPayload>>,
@@ -115,6 +174,8 @@ impl<TPayload: Serialize> Graph<TPayload> {
 
                 if let Some(existing_child) = &self_parent_node.children.self_child {
                     // Should not happen since latest events should not have self children
+
+                    // TODO: insert with self_parent as hash and handle fork insertion.
                     return Err(PushError::SelfChildAlreadyExists(existing_child.clone()));
                 }
 
@@ -165,7 +226,10 @@ impl<TPayload: Serialize> Graph<TPayload> {
         }
 
         // Set witness status
-        if self.determine_witness(&hash) {
+        if self
+            .determine_witness(&hash)
+            .expect("Just inserted to `all_events`")
+        {
             self.witnesses
                 .insert(hash.clone(), WitnessFamousness::Undecided);
         }
@@ -252,9 +316,6 @@ impl<TPayload> Graph<TPayload> {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub struct NotWitness;
-
 impl<TPayload> Graph<TPayload> {
     // TODO: probably move to round field in event to avoid panics and stuff
     pub fn round_of(&self, event_hash: &event::Hash) -> RoundNum {
@@ -272,16 +333,25 @@ impl<TPayload> Graph<TPayload> {
     }
 
     /// Determines if the event is a witness
-    pub fn determine_witness(&self, event_hash: &event::Hash) -> bool {
-        match self.all_events.get(&event_hash).unwrap().parents() {
+    pub fn determine_witness(&self, event_hash: &event::Hash) -> Result<bool, UnknownEvent> {
+        let r = match self
+            .all_events
+            .get(&event_hash)
+            .ok_or(UnknownEvent)?
+            .parents()
+        {
             event::Kind::Genesis => true,
             event::Kind::Regular(Parents { self_parent, .. }) => {
                 self.round_of(event_hash) > self.round_of(self_parent)
             }
-        }
+        };
+        Ok(r)
     }
 
-    pub fn decide_fame_for_witness(&mut self, event_hash: &event::Hash) -> Result<(), NotWitness> {
+    pub fn decide_fame_for_witness(
+        &mut self,
+        event_hash: &event::Hash,
+    ) -> Result<(), WitnessCheckError> {
         let fame = self.is_famous_witness(event_hash)?;
         self.witnesses.insert(event_hash.clone(), fame);
         Ok(())
@@ -294,10 +364,10 @@ impl<TPayload> Graph<TPayload> {
     pub fn is_famous_witness(
         &self,
         event_hash: &event::Hash,
-    ) -> Result<WitnessFamousness, NotWitness> {
+    ) -> Result<WitnessFamousness, WitnessCheckError> {
         // Event must be a witness
-        if !self.determine_witness(event_hash) {
-            return Err(NotWitness);
+        if !self.determine_witness(event_hash)? {
+            return Err(WitnessCheckError::NotWitness);
         }
 
         let r = self.round_of(event_hash);
@@ -309,7 +379,9 @@ impl<TPayload> Graph<TPayload> {
         };
         let mut prev_round_votes = HashMap::new();
         for y_hash in this_round_index {
-            prev_round_votes.insert(y_hash, self.see(y_hash, &event_hash));
+            if self.witnesses.contains_key(y_hash) {
+                prev_round_votes.insert(y_hash, self.see(y_hash, &event_hash));
+            }
         }
 
         // TODO: consider dynamic number of nodes
@@ -392,6 +464,55 @@ impl<TPayload> Graph<TPayload> {
         Ok(WitnessFamousness::Undecided)
     }
 
+    pub fn is_unique_famous_witness(
+        &self,
+        event_hash: &event::Hash,
+    ) -> Result<WitnessUniqueFamousness, WitnessCheckError> {
+        // Get famousness
+        let fame = self.is_famous_witness(event_hash)?;
+
+        // If it's undecided or not famous, we don't need to/can't check uniqueness
+        if let Ok(result) = fame.clone().try_into() {
+            return Ok(result);
+        }
+
+        // Determine uniqueness
+        let r = self.round_of(event_hash);
+        let round_index = match self.round_index.get(r) {
+            Some(index) => index,
+            None => return Ok(WitnessUniqueFamousness::Undecided),
+        };
+        let author = self
+            .all_events
+            .get(event_hash)
+            .ok_or(WitnessCheckError::Unknown(UnknownEvent))?
+            .author();
+        let same_creator_round_index = round_index.iter().filter(|hash| {
+            let other_author = self
+                .all_events
+                .get(hash)
+                .expect("Inconsistent graph state")
+                .author();
+            other_author == author
+        });
+        let same_creator_round_fame: Vec<_> = same_creator_round_index
+            .map(|hash| self.is_famous_witness(hash))
+            .collect();
+
+        // If some events in the round are undecided, wait for them
+        if same_creator_round_fame
+            .iter()
+            .any(|fame| matches!(fame, Ok(WitnessFamousness::Undecided)))
+        {
+            return Ok(WitnessUniqueFamousness::Undecided);
+        }
+
+        let unique = !same_creator_round_fame
+            .iter()
+            .any(|fame| matches!(fame, Ok(WitnessFamousness::Yes)));
+        Ok(WitnessUniqueFamousness::from_famousness(fame, unique))
+    }
+
     fn ancestor(&self, target: &event::Hash, potential_ancestor: &event::Hash) -> bool {
         // TODO: check in other way and return error???
         let _x = self.all_events.get(target).unwrap();
@@ -402,9 +523,8 @@ impl<TPayload> Graph<TPayload> {
             .any(|e| e.hash() == potential_ancestor)
     }
 
-    /// True if y is an ancestor of x, but no fork of y is an ancestor of x
-    ///
-    /// Target is ancestor of observer, for reference
+    /// True if target(y) is an ancestor of observer(x), but no fork of target is an
+    /// ancestor of observer.
     fn see(&self, observer: &event::Hash, target: &event::Hash) -> bool {
         // TODO: add fork check
         return self.ancestor(observer, target);
@@ -1375,7 +1495,7 @@ mod tests {
     fn test_determine_witness() {
         run_tests!(
             tested_function_name => "determine_witness",
-            tested_function => |graph, event| graph.determine_witness(&event),
+            tested_function => |graph, event| graph.determine_witness(&event).expect(&format!("Can't find event {:?}", event)),
             name_lookup => |names, event| names.get(event).unwrap().to_owned(),
             peers_literal => peers,
             tests => [
@@ -1494,7 +1614,7 @@ mod tests {
                         ],
                     ),
                     test_case => (
-                        expect: Err(NotWitness),
+                        expect: Err(WitnessCheckError::NotWitness),
                         arguments: [
                             &peers.get("g1").unwrap().events[1..2],
                             &peers.get("g2").unwrap().events[1..3],
@@ -1518,7 +1638,7 @@ mod tests {
                         ],
                     ),
                     test_case => (
-                        expect: Err(NotWitness),
+                        expect: Err(WitnessCheckError::NotWitness),
                         arguments: vec![
                             &peers.get("a").unwrap().events[1..],
                             &peers.get("b").unwrap().events[1..],
@@ -1562,7 +1682,7 @@ mod tests {
                         ],
                     ),
                     test_case => (
-                        expect: Err(NotWitness),
+                        expect: Err(WitnessCheckError::NotWitness),
                         arguments: [
                             &peers.get("a").unwrap().events[1..2],
                             &peers.get("a").unwrap().events[3..5],
