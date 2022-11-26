@@ -21,6 +21,11 @@ struct PeerIndexEntry {
     genesis: event::Hash,
     /// Use `add_latest` for insertion
     authored_events: NodeIndex<()>,
+    /// Forks authored by the peer that we've observed. Forks are events that have the same
+    /// `self_parent`
+    ///
+    /// Represented by a mapping from `self_parent` to the forked events
+    forks: HashMap<event::Hash, Vec<event::Hash>>,
     // Genesis at start
     latest_event: event::Hash,
 }
@@ -28,8 +33,7 @@ struct PeerIndexEntry {
 #[derive(Serialize, Deserialize, Clone)]
 pub enum PushKind {
     Genesis,
-    /// (other_parent)
-    Regular(event::Hash),
+    Regular(event::Parents),
 }
 
 impl PeerIndexEntry {
@@ -38,10 +42,12 @@ impl PeerIndexEntry {
         Self {
             genesis,
             authored_events: HashMap::new(),
+            forks: HashMap::new(),
             latest_event,
         }
     }
 
+    /// Returns `Some(())` if entry already had event with this hash
     fn add_latest(&mut self, event: event::Hash) -> Option<()> {
         match self.authored_events.insert(event.clone(), ()) {
             Some(a) => Some(a),
@@ -61,8 +67,6 @@ pub enum PushError {
     NoParent(event::Hash),
     #[error("Pushed node is already present in the graph. Hash: `{0}`. Can be triggered if hashes collide for actually different nodes (although extremely unlikely for 512 bit hash)")]
     NodeAlreadyExists(event::Hash),
-    #[error("Specified parent already has child on the same peer. Existing child: `{0}`")]
-    SelfChildAlreadyExists(event::Hash),
     #[error("Given peer in not known ")]
     PeerNotFound(PeerId),
     /// (expected, provided)

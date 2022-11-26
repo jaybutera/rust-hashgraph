@@ -5,10 +5,8 @@ use thiserror::Error;
 use std::collections::{HashMap, HashSet};
 
 use super::event::{self, Event, Parents};
-use super::{PeerIndexEntry, PushError, PushKind, RoundNum};
+use super::{NodeIndex, PeerIndexEntry, PushError, PushKind, RoundNum};
 use crate::PeerId;
-
-type NodeIndex<TIndexPayload> = HashMap<event::Hash, TIndexPayload>;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum WitnessFamousness {
@@ -121,21 +119,17 @@ impl<TPayload: Serialize> Graph<TPayload> {
 
         let new_node = match node_type {
             PushKind::Genesis => Event::new(payload, event::Kind::Genesis, author)?,
-            PushKind::Regular(other_parent) => {
-                let latest_author_event = &self
-                    .peer_index
-                    .get(&author)
-                    .ok_or(PushError::PeerNotFound(author))?
-                    .latest_event;
-                Event::new(
-                    payload,
-                    event::Kind::Regular(Parents {
-                        self_parent: latest_author_event.clone(),
-                        other_parent,
-                    }),
-                    author,
-                )?
-            }
+            PushKind::Regular(Parents {
+                self_parent,
+                other_parent,
+            }) => Event::new(
+                payload,
+                event::Kind::Regular(Parents {
+                    self_parent,
+                    other_parent,
+                }),
+                author,
+            )?,
         };
 
         if self.all_events.contains_key(new_node.hash()) {
@@ -152,7 +146,6 @@ impl<TPayload: Serialize> Graph<TPayload> {
             }
             event::Kind::Regular(parents) => {
                 if !self.all_events.contains_key(&parents.self_parent) {
-                    // Should not be triggered, since we check it above
                     return Err(PushError::NoParent(parents.self_parent.clone()));
                 }
                 if !self.all_events.contains_key(&parents.other_parent) {
@@ -250,8 +243,8 @@ impl<TPayload> Graph<TPayload> {
         self.peer_index.get(peer).map(|e| &e.genesis)
     }
 
-    pub fn event(&self, id: &event::Hash) -> Option<&TPayload> {
-        self.all_events.get(id).map(|e| e.payload())
+    pub fn event(&self, id: &event::Hash) -> Option<&event::Event<TPayload>> {
+        self.all_events.get(id)
     }
 
     /// Iterator over ancestors of the event
@@ -504,6 +497,7 @@ impl<TPayload> Graph<TPayload> {
             .collect();
 
         // If some events in the round are undecided, wait for them
+        // Not sure if should work like that, but seems logical
         if same_creator_round_fame
             .iter()
             .any(|fame| matches!(fame, Ok(WitnessFamousness::Undecided)))
@@ -611,6 +605,8 @@ impl<'a, T> Iterator for EventIter<'a, T> {
 
 #[cfg(test)]
 mod tests {
+    use std::iter::repeat;
+
     use super::*;
 
     /// `run_tests!(name, tested_function, name_lookup, peer_literal, cases)`
@@ -736,7 +732,7 @@ mod tests {
         graph: Graph<T>,
         /// For getting hashes for events
         peers_events: HashMap<String, PeerEvents>,
-        /// For lookup of readable name
+        /// For lookup of readable event name
         names: HashMap<event::Hash, String>,
         setup_name: String,
     }
@@ -836,24 +832,44 @@ mod tests {
         }
     }
 
+    /// ## Description
     /// Add multiple events in the graph (for easier test case creation and
     /// concise and more intuitive writing).
-    /// `events` is list of tuples (event_name, author_name, other_parent_name)
     ///
-    /// `other_parent_name` is either `event_name` of one of the previous entries
-    /// or name of peer for its genesis
-    fn add_events<T: Serialize + Copy>(
+    /// ## Arguments
+    /// ### `events`
+    /// is list of tuples (`event_name`, `creator`, `other_parent_name`)
+    ///
+    /// ### `creator`
+    /// is either
+    /// * `"GENESIS_<peer_name>"` for genesis event of the peer (intended for fork testing)
+    /// * `event_name` of a previous event (intended for fork testing)
+    /// * name of peer for **its latest event** (in `author_ids`, to insert at the end of the graph)
+    ///
+    /// first match is chosen
+    ///
+    /// ### `other_parent_name`
+    /// is either
+    /// * `event_name` of a previous event
+    /// * name of peer for **its genesis**
+    ///
+    /// first match is chosen
+    fn add_events<T, TIter>(
         graph: &mut Graph<T>,
         events: &[(&'static str, &'static str, &'static str)],
         author_ids: HashMap<&'static str, PeerId>,
-        payload: T,
+        payload: &mut TIter,
     ) -> Result<
         (
             HashMap<String, PeerEvents>,
             HashMap<event::Hash, String>, // hash -> event_name
         ),
         PushError,
-    > {
+    >
+    where
+        T: Serialize + Copy + Default,
+        TIter: Iterator<Item = T>,
+    {
         let mut inserted_events = HashMap::with_capacity(events.len());
         let mut peers_events: HashMap<String, PeerEvents> = author_ids
             .keys()
@@ -875,28 +891,58 @@ mod tests {
             })
             .collect();
 
-        for &(event_name, author, other_parent) in events {
-            let other_parent_event_hash = match author_ids.get(other_parent) {
+        for &(event_name, creator, other_parent_event) in events {
+            let other_parent_event_hash = match author_ids.get(other_parent_event) {
                 Some(h) => graph.peer_genesis(h).expect(&format!(
                     "Unknown peer id {} to graph (name '{}')",
-                    h, author
+                    h, creator
                 )),
                 None => inserted_events
-                    .get(other_parent)
-                    .expect(&format!("Unknown `other_parent` '{}'", other_parent)),
+                    .get(other_parent_event)
+                    .expect(&format!("Unknown `other_parent` '{}'", other_parent_event)),
             };
-            let author_id = author_ids
-                .get(author)
-                .expect(&format!("Unknown author name '{}'", author));
+            let genesis_prefix = "GENESIS_";
+            let (self_parent_event_hash, author_id) = match (
+                creator.starts_with(genesis_prefix),
+                inserted_events.get(creator),
+                author_ids.get(creator),
+            ) {
+                (true, _, _) => {
+                    let author_name = creator.trim_start_matches(genesis_prefix);
+                    let author_id = author_ids
+                        .get(author_name)
+                        .expect(&format!("Unknown author name '{}'", author_name));
+                    let self_parent = graph.peer_genesis(author_id).expect(&format!(
+                        "Unknown author id of '{}': {}",
+                        author_name, author_id
+                    ));
+                    (self_parent, author_id)
+                }
+                (false, Some(event), _) => {
+                    let event = graph.event(event).expect("Just inserted the event");
+                    (event.hash(), event.author())
+                }
+                (false, None, Some(author_id)) => (
+                    graph
+                        .peer_latest_event(author_id)
+                        .expect(&format!("Unknown event author {}", creator)),
+                    author_id,
+                ),
+                (false, None, None) => panic!("Could not recognize creator '{}'", creator),
+            };
+            let parents = Parents {
+                self_parent: self_parent_event_hash.clone(),
+                other_parent: other_parent_event_hash.clone(),
+            };
             let new_event_hash = graph.push_node(
-                payload,
-                PushKind::Regular(other_parent_event_hash.clone()),
+                payload.next().expect("Iterator finished"),
+                PushKind::Regular(parents),
                 *author_id,
             )?;
-            let author = author.to_owned();
+            let author = creator.trim_start_matches(genesis_prefix).to_owned();
             peers_events
                 .get_mut(&author)
-                .expect("Just checked presence")
+                .expect("Just checked author presence")
                 .events
                 .push(new_event_hash.clone());
             let clashed_event = inserted_events.insert(event_name.to_owned(), new_event_hash);
@@ -930,7 +976,7 @@ mod tests {
         Ok(names)
     }
 
-    fn build_graph_from_paper<T: Serialize + Copy>(
+    fn build_graph_from_paper<T: Serialize + Copy + Default>(
         payload: T,
         coin_frequency: usize,
     ) -> Result<TestSetup<T>, PushError> {
@@ -951,7 +997,8 @@ mod tests {
             ("c5", "c", "e2"),
             ("c6", "c", "a3"),
         ];
-        let (peers_events, new_names) = add_events(&mut graph, &events, author_ids, payload)?;
+        let (peers_events, new_names) =
+            add_events(&mut graph, &events, author_ids, &mut repeat(payload))?;
         names.extend(new_names);
         Ok(TestSetup {
             graph,
@@ -961,7 +1008,7 @@ mod tests {
         })
     }
 
-    fn build_graph_some_chain<T: Serialize + Copy>(
+    fn build_graph_some_chain<T: Serialize + Copy + Default>(
         payload: T,
         coin_frequency: usize,
     ) -> Result<TestSetup<T>, PushError> {
@@ -989,7 +1036,8 @@ mod tests {
             ("e6", "g3", "e5"),
             ("e7", "g2", "e6"),
         ];
-        let (peers_events, new_names) = add_events(&mut graph, &events, author_ids, payload)?;
+        let (peers_events, new_names) =
+            add_events(&mut graph, &events, author_ids, &mut repeat(payload))?;
         names.extend(new_names);
         Ok(TestSetup {
             graph,
@@ -999,7 +1047,7 @@ mod tests {
         })
     }
 
-    fn build_graph_detailed_example<T: Serialize + Copy>(
+    fn build_graph_detailed_example<T: Serialize + Copy + Default>(
         payload: T,
         coin_frequency: usize,
     ) -> Result<TestSetup<T>, PushError> {
@@ -1049,7 +1097,57 @@ mod tests {
             ("d4", "d", "c3"),
             ("b4", "b", "d4"),
         ];
-        let (peers_events, new_names) = add_events(&mut graph, &events, author_ids, payload)?;
+        let (peers_events, new_names) =
+            add_events(&mut graph, &events, author_ids, &mut repeat(payload))?;
+        names.extend(new_names);
+        Ok(TestSetup {
+            graph,
+            peers_events,
+            names,
+            setup_name: "Detailed examples tech report".to_owned(),
+        })
+    }
+
+    fn build_graph_fork<T, TIter>(
+        mut payload: TIter,
+        coin_frequency: usize,
+    ) -> Result<TestSetup<T>, PushError>
+    where
+        T: Serialize + Copy + Default,
+        TIter: Iterator<Item = T>,
+    {
+        // Graph to test fork handling
+        // In peers_events the "_forked" event goes before non-fork (they're simmetric, so we refer
+        // to the names)
+        let author_ids = HashMap::from([("a", 0), ("m", 1)]);
+        let mut graph = Graph::new(
+            *author_ids.get("a").unwrap(),
+            payload.next().expect("Iterator finished"),
+            coin_frequency,
+        );
+        let mut names = add_geneses(
+            &mut graph,
+            "a",
+            &author_ids,
+            payload.next().expect("Iterator finished"),
+        )?;
+        let events = [
+            //  (name,  peer, other_parent)
+            // round 1
+            ("a1_1", "a", "m"),
+            // round 2
+            ("m2", "GENESIS_m", "a1_1"),
+            ("m2_fork", "GENESIS_m", "a1_1"),
+            ("m2_1", "m2_fork", "m2"),
+            ("a2", "a", "m2_1"),
+            // round 3
+            ("m3", "m", "a2"),
+            ("a3", "a", "m3"),
+            // round 4
+            ("m4", "m", "a3"),
+            ("a4", "a", "m4"),
+        ];
+        let (peers_events, new_names) = add_events(&mut graph, &events, author_ids, &mut payload)?;
         names.extend(new_names);
         Ok(TestSetup {
             graph,
@@ -1066,6 +1164,8 @@ mod tests {
         build_graph_from_paper((), 999).unwrap();
         build_graph_some_chain((), 999).unwrap();
         build_graph_detailed_example((), 999).unwrap();
+        // To make hashes of forks different
+        build_graph_fork([42, 1337, 80085].into_iter().cycle(), 999).unwrap();
     }
 
     #[test]
@@ -1106,10 +1206,25 @@ mod tests {
             setup_name: _,
         } = build_graph_from_paper((), 999).unwrap();
         let fake_node = Event::new((), event::Kind::Genesis, 1232423).unwrap();
+        let legit_node_hash = graph.peer_latest_event(&0).unwrap().clone();
+
+        let fake_parents_1 = Parents {
+            self_parent: fake_node.hash().clone(),
+            other_parent: legit_node_hash.clone(),
+        };
         assert!(matches!(
-            graph.push_node((), PushKind::Regular(fake_node.hash().clone()), peers.get("a").unwrap().id),
+            graph.push_node((), PushKind::Regular(fake_parents_1), peers.get("a").unwrap().id),
             Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_node.hash()
-        ))
+        ));
+
+        let fake_parents_2 = Parents {
+            self_parent: legit_node_hash.clone(),
+            other_parent: fake_node.hash().clone(),
+        };
+        assert!(matches!(
+            graph.push_node((), PushKind::Regular(fake_parents_2), peers.get("a").unwrap().id),
+            Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_node.hash()
+        ));
     }
 
     // Test graph properties
@@ -1716,7 +1831,7 @@ mod tests {
             peers_literal => peers,
             tests => [
                 (
-                    setup => build_graph_some_chain((), 999).unwrap(),
+                    setup => build_graph_some_chain(0, 999).unwrap(),
                     test_case => (
                         expect: Ok(WitnessUniqueFamousness::Undecided),
                         arguments: vec![
@@ -1740,7 +1855,7 @@ mod tests {
                     ),
                 ),
                 (
-                    setup => build_graph_from_paper((), 999).unwrap(),
+                    setup => build_graph_from_paper(0, 999).unwrap(),
                     test_case => (
                         expect: Ok(WitnessUniqueFamousness::Undecided),
                         arguments: vec![
@@ -1766,7 +1881,7 @@ mod tests {
                     ),
                 ),
                 (
-                    setup => build_graph_detailed_example((), 999).unwrap(),
+                    setup => build_graph_detailed_example(0, 999).unwrap(),
                     test_case => (
                         expect: Ok(WitnessUniqueFamousness::FamousUnique),
                         arguments: vec![
@@ -1813,7 +1928,41 @@ mod tests {
                             .flat_map(|s| s.iter().collect::<Vec<&_>>())
                             .collect(),
                     ),
-                )
+                ),
+                (
+                    setup => build_graph_fork([42, 1337, 80085].into_iter().cycle(), 999).unwrap(),
+                    test_case => (
+                        expect: Ok(WitnessUniqueFamousness::FamousUnique),
+                        arguments: vec![
+                            &peers.get("a").unwrap().events[0],
+                            &peers.get("a").unwrap().events[2],
+                            &peers.get("m").unwrap().events[0],
+                        ],
+                    ),
+                    test_case => (
+                        expect: Ok(WitnessUniqueFamousness::FamousNotUnique),
+                        arguments: vec![
+                            &peers.get("m").unwrap().events[1],
+                            &peers.get("m").unwrap().events[2],
+                        ],
+                    ),
+                    test_case => (
+                        expect: Ok(WitnessUniqueFamousness::Undecided),
+                        arguments: vec![
+                            &peers.get("a").unwrap().events[3],
+                            &peers.get("a").unwrap().events[4],
+                            &peers.get("m").unwrap().events[4],
+                            &peers.get("m").unwrap().events[5],
+                        ],
+                    ),
+                    test_case => (
+                        expect: Err(WitnessCheckError::NotWitness),
+                        arguments: vec![
+                            &peers.get("a").unwrap().events[1],
+                            &peers.get("m").unwrap().events[3]
+                        ],
+                    ),
+                ),
             ]
         );
     }
