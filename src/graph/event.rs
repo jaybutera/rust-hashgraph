@@ -47,7 +47,7 @@ pub struct Event<TPayload> {
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
 pub struct Children {
-    pub self_child: Option<Hash>,
+    pub self_child: Vec<Hash>,
     pub other_children: Vec<Hash>,
 }
 
@@ -68,7 +68,7 @@ impl<TPayload: Serialize> Event<TPayload> {
         let hash = Self::calculate_hash(&payload, &event_kind, &author)?;
         Ok(Event {
             children: Children {
-                self_child: None,
+                self_child: vec![],
                 other_children: vec![],
             },
             id: hash,

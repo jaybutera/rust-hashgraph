@@ -5,7 +5,8 @@ use thiserror::Error;
 use std::collections::{HashMap, HashSet};
 
 use super::event::{self, Event, Parents};
-use super::{NodeIndex, PeerIndexEntry, PushError, PushKind, RoundNum};
+use super::index::{NodeIndex, PeerIndexEntry};
+use super::{PushError, PushKind, RoundNum};
 use crate::PeerId;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -156,7 +157,7 @@ impl<TPayload: Serialize> Graph<TPayload> {
                 let self_parent_node = self
                     .all_events
                     .get_mut(&parents.self_parent) // TODO: use get_many_mut when stabilized
-                    .expect("Just checked presence before");
+                    .expect("Just checked self parent presence");
 
                 if self_parent_node.author() != &author {
                     return Err(PushError::IncorrectAuthor(
@@ -165,12 +166,12 @@ impl<TPayload: Serialize> Graph<TPayload> {
                     ));
                 }
 
-                if let Some(existing_child) = &self_parent_node.children.self_child {
-                    // Should not happen since latest events should not have self children
+                // if let Some(existing_child) = &self_parent_node.children.self_child {
+                //     // Should not happen since latest events should not have self children
 
-                    // TODO: insert with self_parent as hash and handle fork insertion.
-                    return Err(PushError::SelfChildAlreadyExists(existing_child.clone()));
-                }
+                //     // TODO: insert with self_parent as hash and handle fork insertion.
+                //     return Err(PushError::SelfChildAlreadyExists(existing_child.clone()));
+                // }
 
                 // taking mutable for update later
                 let author_index = self
@@ -181,17 +182,26 @@ impl<TPayload: Serialize> Graph<TPayload> {
                 // Insertion, should be valid at this point so that we don't leave in inconsistent state on error.
 
                 // update pointers of parents
-                self_parent_node.children.self_child = Some(new_node.hash().clone());
+                if let Some(sibling) = self_parent_node.children.self_child.get(0) {
+                    // TODO: handle fork insertion somehow or check if it's handled?.
+                    // Track the fork
+                    author_index.add_fork(self_parent_node.hash().clone(), sibling.clone());
+                    author_index.add_fork(self_parent_node.hash().clone(), new_node.hash().clone());
+                }
+                self_parent_node
+                    .children
+                    .self_child
+                    .push(new_node.hash().clone());
                 let other_parent_node = self
                     .all_events
                     .get_mut(&parents.other_parent)
-                    .expect("Just checked presence before");
+                    .expect("Just checked other parent presence");
                 other_parent_node
                     .children
                     .other_children
                     .push(new_node.hash().clone());
                 if let Some(_) = author_index.add_latest(new_node.hash().clone()) {
-                    // TODO: warn
+                    // TODO: warn, inconsistent state between `all_events` and `author_index`
                     panic!()
                 }
             }
@@ -236,11 +246,11 @@ impl<TPayload> Graph<TPayload> {
     }
 
     pub fn peer_latest_event(&self, peer: &PeerId) -> Option<&event::Hash> {
-        self.peer_index.get(peer).map(|e| &e.latest_event)
+        self.peer_index.get(peer).map(|e| e.latest_event())
     }
 
     pub fn peer_genesis(&self, peer: &PeerId) -> Option<&event::Hash> {
-        self.peer_index.get(peer).map(|e| &e.genesis)
+        self.peer_index.get(peer).map(|e| e.genesis())
     }
 
     pub fn event(&self, id: &event::Hash) -> Option<&event::Event<TPayload>> {
@@ -605,7 +615,7 @@ impl<'a, T> Iterator for EventIter<'a, T> {
 
 #[cfg(test)]
 mod tests {
-    use std::iter::repeat;
+    use std::{iter::repeat, ops::Deref};
 
     use super::*;
 
@@ -902,7 +912,7 @@ mod tests {
                     .expect(&format!("Unknown `other_parent` '{}'", other_parent_event)),
             };
             let genesis_prefix = "GENESIS_";
-            let (self_parent_event_hash, author_id) = match (
+            let (self_parent_event_hash, author_id, author) = match (
                 creator.starts_with(genesis_prefix),
                 inserted_events.get(creator),
                 author_ids.get(creator),
@@ -916,17 +926,26 @@ mod tests {
                         "Unknown author id of '{}': {}",
                         author_name, author_id
                     ));
-                    (self_parent, author_id)
+                    let author = creator.trim_start_matches(genesis_prefix).to_owned();
+                    (self_parent, author_id, author)
                 }
                 (false, Some(event), _) => {
                     let event = graph.event(event).expect("Just inserted the event");
-                    (event.hash(), event.author())
+                    let author = author_ids
+                        .iter()
+                        .find(|(_name, id)| id == &event.author())
+                        .expect("Just inserted the event, should be tracked")
+                        .0
+                        .deref()
+                        .to_owned();
+                    (event.hash(), event.author(), author)
                 }
                 (false, None, Some(author_id)) => (
                     graph
                         .peer_latest_event(author_id)
                         .expect(&format!("Unknown event author {}", creator)),
                     author_id,
+                    creator.to_owned(),
                 ),
                 (false, None, None) => panic!("Could not recognize creator '{}'", creator),
             };
@@ -939,10 +958,9 @@ mod tests {
                 PushKind::Regular(parents),
                 *author_id,
             )?;
-            let author = creator.trim_start_matches(genesis_prefix).to_owned();
             peers_events
                 .get_mut(&author)
-                .expect("Just checked author presence")
+                .expect(&format!("Author '{}' should be in the index", author))
                 .events
                 .push(new_event_hash.clone());
             let clashed_event = inserted_events.insert(event_name.to_owned(), new_event_hash);
