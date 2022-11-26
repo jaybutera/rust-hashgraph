@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub mod datastructure;
 pub mod event;
-pub mod graph;
 mod index;
 
 // u64 must be enough, if new round each 0.1 second
@@ -30,7 +30,7 @@ pub enum PushError {
     NodeAlreadyExists(event::Hash),
     #[error("Given peer in not known ")]
     PeerNotFound(PeerId),
-    /// (expected, provided)
+    /// `(expected, provided)`
     #[error("Provided author is different from author of self parent (expected {0}, provided {1}")]
     IncorrectAuthor(PeerId, PeerId),
     #[error("Serialization failed")]
