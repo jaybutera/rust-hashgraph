@@ -77,12 +77,12 @@ pub struct UnknownEvent;
 pub struct Graph<TPayload> {
     all_events: NodeIndex<Event<TPayload>>,
     peer_index: HashMap<PeerId, PeerIndexEntry>,
-    /// Consistent and reliable index. TODO: check this property with fresh head.
+    /// Consistent and reliable index (should be)
     round_index: Vec<HashSet<event::Hash>>,
     /// Some(false) means unfamous witness
     witnesses: HashMap<event::Hash, WitnessFamousness>,
-    /// Cache, should'n be relied upon (?)
-    round_of: HashMap<event::Hash, RoundNum>, // Just testing a caching system for now
+    /// Cache, shouldn't be relied upon (however seems as reliable as `round_index`)
+    round_of: HashMap<event::Hash, RoundNum>,
     /// If round # is in the set - it's decided
     rounds_decided_cache: HashSet<usize>,
 
@@ -541,14 +541,47 @@ impl<TPayload> Graph<TPayload> {
         Ok(WitnessUniqueFamousness::from_famousness(fame, unique))
     }
 
-    fn is_round_decided(&self, r: usize) -> bool {
+    /// true if all known witnesses had their fame decided, for both
+    /// round r and all earlier rounds (from the paper)
+    fn is_round_decided(&mut self, r: usize) -> bool {
         // TODO: check that the rounds can't be undecided for some reason
         // (shouldn't happen, right??). I assume this when saving that
 
         // Usually the last round should fail first, however not sure if it's
         // cheaper to compute from the end.
-        for checked_round in (0..=r).rev() {}
-        false
+        for checked_round in (0..=r).rev() {
+            if self.rounds_decided_cache.contains(&checked_round) {
+                continue;
+            }
+            let round_witnesses = if let Some(i) = self.round_witnesses(r) {
+                i
+            } else {
+                return false;
+            };
+            for event_hash in round_witnesses {
+                match self.is_famous_witness(event_hash) {
+                    Ok(WitnessFamousness::Undecided) => {
+                        return false;
+                    }
+                    Ok(_) => {
+                        continue;
+                    }
+                    Err(WitnessCheckError::NotWitness) => {
+                        // TODO: warn?? or smth, maybe separate error
+                        panic!("Witnesses index or witness check is broken, inconsistent state");
+                    }
+                    Err(WitnessCheckError::Unknown(_)) => {
+                        // TODO: warn?? or smth, maybe separate error
+                        panic!("Witnesses index or something else is broken, inconsistent state");
+                    }
+                }
+            }
+            // At this point we know that round `checked_round` is decided
+            // we should be safe to save this not to recompute it later
+            self.rounds_decided_cache.insert(checked_round);
+        }
+        // This and all previous rounds were decided
+        true
     }
 
     fn ancestor(&self, target: &event::Hash, potential_ancestor: &event::Hash) -> bool {

@@ -2,7 +2,7 @@ use std::{iter::repeat, ops::Deref};
 
 use super::*;
 
-/// `run_tests!(name, tested_function, name_lookup, peer_literal, cases)`
+/// `run_tests!(tested_function_name, tested_function, name_lookup, peer_literal, cases)`
 /// # Description
 /// Test a property of a graph according to test cases.
 ///
@@ -17,6 +17,52 @@ use super::*;
 ///
 /// Upon calling the macro, first specify property name, function to test, and
 /// lookup. Then list test cases for each graph.
+///
+/// Let's look in details:
+///
+/// ```no_run
+/// run_tests!(
+///     // Human-readable functionality name, it will only appear in test logs (panics)
+///     tested_function_name => "cool property",
+///     // Function that will be called on each argument provided (in `arguments`).
+///     // Its output is compared to values in `expect`. First argument is always
+///     // the graph
+///     tested_function => |g, event| g.kek(&event),
+///     // Function that finds name of argument given. Only used for more readable logs.
+///     name_lookup => |names, event| names.get(event).unwrap().to_owned(),
+///     // Literal for referring to index of events by peer in each test.
+///     // Used to insert particular event hashes in `arguments`, because
+///     // pasting hashes is completely unreadable.
+///     peers_literal => peers,
+///     // One test for each graph setup
+///     tests => [
+///         (
+///             // Graph that we test here
+///             setup => build_graph(),
+///             // Test cases, one per expected return value
+///             test_case => (
+///                 // Value we expect to receive from `tested_funciton`
+///                 expect: false,
+///                 // Arguments we provide one by one to `tested_funciton`
+///                 arguments: vec![
+///                     &peers.get("g1").unwrap().events[2],
+///                     &peers.get("g1").unwrap().events[1],
+///                 ]
+///             ),
+///             // Another test case
+///             test_case => (
+///                 // Different expected value
+///                 expect: true,
+///                 // One can use slices like this not to insert each element separately
+///                 arguments: [
+///                     &peers.get("g1").unwrap().events[0..3],
+///                     &peers.get("g2").unwrap().events[0..2],
+///                 ].concat(),
+///             )
+///         ),
+///     ]
+/// );
+/// ```
 ///
 /// ## Examples
 ///
@@ -101,19 +147,21 @@ macro_rules! run_tests {
         ) => {
             let mut cases = vec![];
             $(
-                let TestSetup { peers_events: $peers_literal, .. } = $setup;
+                let setup = $setup;
+                let $peers_literal = setup.peers_events.clone();
                 let graph_cases = vec![
                     $((
                         $expect,
                         $arguments
                     )),*
                 ];
-                cases.push(Test { setup: ($setup), results_args: graph_cases });
+                cases.push(Test { setup, results_args: graph_cases });
             )*
             test_cases(cases, $property_name, $tested_function, $name_lookup);
         };
     }
 
+#[derive(Clone)]
 struct PeerEvents {
     id: PeerId,
     events: Vec<event::Hash>,
@@ -192,7 +240,7 @@ fn test_cases<TPayload, TArg, TResult, F, FNameLookup>(
     tested_function: F,
     name_lookup: FNameLookup,
 ) where
-    F: Fn(&Graph<TPayload>, &TArg) -> TResult,
+    F: Fn(&mut Graph<TPayload>, &TArg) -> TResult,
     TResult: PartialEq + std::fmt::Debug,
     FNameLookup: Fn(&HashMap<event::Hash, String>, &TArg) -> String,
 {
@@ -202,14 +250,14 @@ fn test_cases<TPayload, TArg, TResult, F, FNameLookup>(
     } in cases
     {
         let TestSetup {
-            graph,
+            mut graph,
             peers_events: _,
             names,
             setup_name,
         } = setup;
         for (expected_result, result_cases) in graph_cases {
             for case in result_cases {
-                let result = tested_function(&graph, &case);
+                let result = tested_function(&mut graph, &case);
                 assert_eq!(
                     result,
                     expected_result,
@@ -1549,6 +1597,54 @@ fn test_is_unique_famous_witness() {
                         &peers.get("a").unwrap().events[1],
                         &peers.get("m").unwrap().events[3]
                     ],
+                ),
+            ),
+        ]
+    );
+}
+
+#[test]
+fn test_is_round_decided() {
+    run_tests!(
+        tested_function_name => "is_round_decided",
+        tested_function => |g, r| g.is_round_decided(*r),
+        name_lookup => |_names, r| r.to_string(),
+        peers_literal => _peers,
+        tests => [
+            (
+                setup => build_graph_some_chain(0, 999).unwrap(),
+                test_case => (
+                    expect: false,
+                    arguments: vec![0, 1],
+                ),
+            ),
+            (
+                setup => build_graph_from_paper(0, 999).unwrap(),
+                test_case => (
+                    expect: false,
+                    arguments: vec![0, 1],
+                ),
+            ),
+            (
+                setup => build_graph_detailed_example(0, 999).unwrap(),
+                test_case => (
+                    expect: true,
+                    arguments: vec![0, 1],
+                ),
+                test_case => (
+                    expect: false,
+                    arguments: vec![2, 3],
+                ),
+            ),
+            (
+                setup => build_graph_fork([42, 1337, 80085].into_iter().cycle(), 999).unwrap(),
+                test_case => (
+                    expect: true,
+                    arguments: vec![0, 1],
+                ),
+                test_case => (
+                    expect: false,
+                    arguments: vec![2, 3],
                 ),
             ),
         ]
