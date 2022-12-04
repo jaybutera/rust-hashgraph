@@ -228,9 +228,8 @@ impl<TPayload: Serialize> Graph<TPayload> {
             round_hs.insert(hash.clone());
             self.round_index.push(round_hs);
         } else {
-            // Otherwise push onto current round
-            // (TODO: check why not to round `r`????)
-            self.round_index[last_idx].insert(hash.clone());
+            // Otherwise push onto appropriate round
+            self.round_index[r].insert(hash.clone());
         }
 
         // Set witness status
