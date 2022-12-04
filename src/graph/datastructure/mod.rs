@@ -77,10 +77,14 @@ pub struct UnknownEvent;
 pub struct Graph<TPayload> {
     all_events: NodeIndex<Event<TPayload>>,
     peer_index: HashMap<PeerId, PeerIndexEntry>,
+    /// Consistent and reliable index. TODO: check this property with fresh head.
     round_index: Vec<HashSet<event::Hash>>,
     /// Some(false) means unfamous witness
     witnesses: HashMap<event::Hash, WitnessFamousness>,
+    /// Cache, should'n be relied upon (?)
     round_of: HashMap<event::Hash, RoundNum>, // Just testing a caching system for now
+    /// If round # is in the set - it's decided
+    rounds_decided_cache: HashSet<usize>,
 
     // probably move to config later
     self_id: PeerId,
@@ -97,6 +101,7 @@ impl<T: Serialize> Graph<T> {
             round_index: vec![HashSet::new()],
             witnesses: HashMap::new(),
             round_of: HashMap::new(),
+            rounds_decided_cache: HashSet::new(),
             coin_frequency,
         };
 
@@ -287,35 +292,48 @@ impl<TPayload> Graph<TPayload> {
                     self.determine_round(other_parent),
                 );
 
-                // Get events from round r
-                let round = self.round_index[r]
-                    .iter()
+                // Get witnesses from round r
+                let round_witnesses = self
+                    .round_witnesses(r)
+                    .unwrap()
+                    .into_iter()
                     .filter(|eh| *eh != event_hash)
                     .map(|e_hash| self.all_events.get(e_hash).unwrap())
                     .collect::<Vec<_>>();
 
                 // Find out how many witnesses by unique members the event can strongly see
-                let witnesses_strongly_seen = round
-                    .iter()
-                    .filter(|e| self.witnesses.contains_key(&e.hash()))
-                    .fold(HashSet::new(), |mut set, witness| {
-                        if self.strongly_see(event_hash, &witness.hash()) {
-                            let author = witness.author();
-                            set.insert(author.clone());
-                        }
-                        set
-                    });
+                let round_witnesses_strongly_seen =
+                    round_witnesses
+                        .iter()
+                        .fold(HashSet::new(), |mut set, witness| {
+                            if self.strongly_see(event_hash, &witness.hash()) {
+                                let author = witness.author();
+                                set.insert(author.clone());
+                            }
+                            set
+                        });
 
                 // n is number of members in hashgraph
                 let n = self.members_count();
 
-                if witnesses_strongly_seen.len() > (2 * n / 3) {
+                if round_witnesses_strongly_seen.len() > (2 * n / 3) {
                     r + 1
                 } else {
                     r
                 }
             }
         }
+    }
+
+    /// None if this round is unknown
+    fn round_witnesses(&self, r: usize) -> Option<HashSet<&event::Hash>> {
+        Some(
+            self.round_index
+                .get(r)?
+                .iter()
+                .filter(|e| self.witnesses.contains_key(e))
+                .collect(),
+        )
     }
 }
 
@@ -330,7 +348,7 @@ impl<TPayload> Graph<TPayload> {
                     .enumerate()
                     .find(|(_, round)| round.contains(&event_hash))
                     .expect("Failed to find a round for event")
-                    .0
+                    .0 // add to `round_of` in this case maybe??
             }
         }
     }
@@ -403,9 +421,11 @@ impl<TPayload> Graph<TPayload> {
                 .filter(|e| self.witnesses.contains_key(e));
             for y_hash in round_witnesses {
                 // The set of witness events in round (y.round-1) that y can strongly see
-                let s = self.round_index[voter_round - 1]
-                    .iter()
-                    .filter(|h| self.witnesses.contains_key(h) && self.strongly_see(y_hash, h));
+                let s = self
+                    .round_witnesses(voter_round - 1)
+                    .unwrap() // TODO: handle/check if ok?
+                    .into_iter()
+                    .filter(|h| self.strongly_see(y_hash, h));
                 // count votes
                 let (votes_for, votes_against) = s.fold((0, 0), |(yes, no), prev_round_witness| {
                     let vote = prev_round_votes.get(prev_round_witness);
@@ -430,6 +450,7 @@ impl<TPayload> Graph<TPayload> {
                         // TODO: move supermajority cond to func
                         // if supermajority, then decide
                         let fame = match v {
+                            // Maybe save the result?? shouldn't change if decided, right?
                             true => WitnessFamousness::Yes,
                             false => WitnessFamousness::No,
                         };
@@ -519,6 +540,16 @@ impl<TPayload> Graph<TPayload> {
             .iter()
             .any(|fame| matches!(fame, Ok(WitnessFamousness::Yes)));
         Ok(WitnessUniqueFamousness::from_famousness(fame, unique))
+    }
+
+    fn is_round_decided(&self, r: usize) -> bool {
+        // TODO: check that the rounds can't be undecided for some reason
+        // (shouldn't happen, right??). I assume this when saving that
+
+        // Usually the last round should fail first, however not sure if it's
+        // cheaper to compute from the end.
+        for checked_round in (0..=r).rev() {}
+        false
     }
 
     fn ancestor(&self, target: &event::Hash, potential_ancestor: &event::Hash) -> bool {
