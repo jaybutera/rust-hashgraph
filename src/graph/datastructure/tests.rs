@@ -558,6 +558,42 @@ where
     })
 }
 
+fn build_graph_index_test<T: Serialize + Copy + Default>(
+    payload: T,
+    coin_frequency: usize,
+) -> Result<TestSetup<T>, PushError> {
+    // Graph to test round_index assignment. It seems that the logic is broken slightly,
+    // this should fail with existing impl.
+    let author_ids = HashMap::from([("a", 0), ("b", 1), ("c", 2), ("d", 3)]);
+    let mut graph = Graph::new(*author_ids.get("b").unwrap(), payload, coin_frequency);
+    let mut names = add_geneses(&mut graph, "b", &author_ids, payload)?;
+    // resources/graph_example.png for reference
+    let events = [
+        //  (name,  peer, other_parent)
+        // round 0
+        ("d1", "d", "c"),
+        ("c1", "c", "b"),
+        ("b1", "b", "d1"),
+        ("d2", "d", "c1"),
+        ("d3", "d", "b1"),
+        ("d4", "d", "c1"),
+        // round 1
+        ("c2", "c", "d4"),
+        // round 0 again, this order should be the problem
+        ("a1", "a", "b"),
+        ("a2", "a", "b1"),
+    ];
+    let (peers_events, new_names) =
+        add_events(&mut graph, &events, author_ids, &mut repeat(payload))?;
+    names.extend(new_names);
+    Ok(TestSetup {
+        graph,
+        peers_events,
+        names,
+        setup_name: "`round_index` test".to_owned(),
+    })
+}
+
 // Test simple work + errors
 
 #[test]
@@ -1006,6 +1042,157 @@ fn test_determine_round() {
                     ]
                     .concat()
                 )
+            ),
+            (
+                setup => build_graph_index_test((), 999).unwrap(),
+                test_case => (
+                    expect: 0usize,
+                    arguments: [
+                        &peers.get("a").unwrap().events[0..3],
+                        &peers.get("b").unwrap().events[0..2],
+                        &peers.get("c").unwrap().events[0..2],
+                        &peers.get("d").unwrap().events[0..5],
+                    ]
+                    .concat()
+                ),
+                test_case => (
+                    expect: 1,
+                    arguments: [
+                        &peers.get("c").unwrap().events[2..3],
+                    ]
+                    .concat()
+                ),
+            ),
+        ]
+    );
+}
+
+#[test]
+fn test_round_indices_consistent() {
+    // Uses internal state, yes. Want to make sure it's consistent to avoid future problems.
+    fn round_index_consistent<T>(graph: &Graph<T>, hash: &event::Hash) -> Result<usize, String> {
+        let round_of_num = graph.round_of(hash);
+        let round_index = graph
+            .round_index
+            .get(round_of_num)
+            .ok_or(format!("No round {} index found", round_of_num))?;
+        if round_index.contains(hash) {
+            Ok(round_of_num)
+        } else {
+            Err(format!(
+                "round_index of round {} does not have the round",
+                round_of_num
+            ))
+        }
+    }
+    run_tests!(
+        tested_function_name => "round_index_consistency",
+        tested_function => |g, args| round_index_consistent(g, &args),
+        name_lookup => |names, event| names.get(event).unwrap().to_owned(),
+        peers_literal => peers,
+        tests => [
+            (
+                setup => build_graph_some_chain((), 999).unwrap(),
+                test_case => (
+                    expect: Ok(0),
+                    arguments: [
+                        &peers.get("g1").unwrap().events[0..2],
+                        &peers.get("g2").unwrap().events[0..3],
+                        &peers.get("g3").unwrap().events[0..2],
+                    ]
+                    .concat()
+                ),
+                test_case => (
+                    expect: Ok(1),
+                    arguments: [
+                        &peers.get("g1").unwrap().events[2..3],
+                        &peers.get("g2").unwrap().events[3..4],
+                        &peers.get("g3").unwrap().events[2..3],
+                    ]
+                    .concat()
+                )
+            ),
+            (
+                setup => build_graph_from_paper((), 999).unwrap(),
+                test_case => (
+                    expect: Ok(0),
+                    arguments: [
+                        &peers.get("a").unwrap().events[1..],
+                        &peers.get("b").unwrap().events[1..],
+                        &peers.get("c").unwrap().events[1..5],
+                        &peers.get("d").unwrap().events[1..],
+                        &peers.get("e").unwrap().events[1..]
+                    ]
+                    .concat()
+                ),
+                test_case => (
+                    expect: Ok(1),
+                    arguments: [
+                        &peers.get("c").unwrap().events[5..],
+                    ]
+                    .concat()
+                )
+            ),
+            (
+                setup => build_graph_detailed_example((), 999).unwrap(),
+                test_case => (
+                    expect: Ok(0usize),
+                    arguments: [
+                        &peers.get("a").unwrap().events[0..2],
+                        &peers.get("b").unwrap().events[0..4],
+                        &peers.get("c").unwrap().events[0..2],
+                        &peers.get("d").unwrap().events[0..4],
+                    ]
+                    .concat()
+                ),
+                test_case => (
+                    expect: Ok(1),
+                    arguments: [
+                        &peers.get("a").unwrap().events[2..5],
+                        &peers.get("b").unwrap().events[4..6],
+                        &peers.get("c").unwrap().events[2..3],
+                        &peers.get("d").unwrap().events[4..7],
+                    ]
+                    .concat()
+                ),
+                test_case => (
+                    expect: Ok(2),
+                    arguments: [
+                        &peers.get("a").unwrap().events[5..8],
+                        &peers.get("b").unwrap().events[6..11],
+                        &peers.get("c").unwrap().events[3..4],
+                        &peers.get("d").unwrap().events[7..10],
+                    ]
+                    .concat()
+                ),
+                test_case => (
+                    expect: Ok(3),
+                    arguments: [
+                        &peers.get("b").unwrap().events[11..12],
+                        &peers.get("d").unwrap().events[10..11],
+                    ]
+                    .concat()
+                )
+            ),
+            ( // YESSS IT FAILS!1.1.1.1..
+                setup => build_graph_index_test((), 999).unwrap(),
+                test_case => (
+                    expect: Ok(0usize),
+                    arguments: [
+                        &peers.get("a").unwrap().events[0..3],
+                        &peers.get("b").unwrap().events[0..2],
+                        &peers.get("c").unwrap().events[0..2],
+                        &peers.get("d").unwrap().events[0..5],
+                    ]
+                    .concat()
+                ),
+                test_case => (
+                    expect: Ok(1),
+                    arguments: [
+                        &peers.get("c").unwrap().events[2..3],
+                    ]
+                    .concat()
+                ),
             ),
         ]
     );
