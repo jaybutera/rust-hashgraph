@@ -584,6 +584,54 @@ impl<TPayload> Graph<TPayload> {
         true
     }
 
+    /// If false, it's undecided
+    fn round_received(&mut self, event_hash: &event::Hash) -> Option<usize> {
+        // "x is an ancestor of every round r unique famous witness", where `r` is
+        // `checked_round`.
+
+        // Also we want the first round that satisfies desired condition, so we
+        // check from round of x to the latest and pick the first (or declare it
+        // undecided).
+        for checked_round in self.round_of(event_hash)..self.round_index.len() {
+            // Move iteration on unique famous witnesses in a separate func (+ do
+            // smth with panics)
+            let mut unique_famous_witnesses = vec![];
+            for witness in self
+                .round_witnesses(checked_round)
+                .expect("Inconsistent state between `round_of` and `round_index`")
+            {
+                match self.is_famous_witness(witness) {
+                    Ok(WitnessFamousness::Undecided) => {
+                        return None;
+                    }
+                    Ok(WitnessFamousness::Yes) => {
+                        unique_famous_witnesses.push(witness);
+                    }
+                    Ok(WitnessFamousness::No) => {
+                        continue;
+                    }
+                    Err(WitnessCheckError::NotWitness) => {
+                        // TODO: warn?? or smth, maybe separate error
+                        panic!("Witnesses index or witness check is broken, inconsistent state");
+                    }
+                    Err(WitnessCheckError::Unknown(_)) => {
+                        // TODO: warn?? or smth, maybe separate error
+                        panic!("Witnesses index or something else is broken, inconsistent state");
+                    }
+                }
+            }
+            if unique_famous_witnesses
+                .iter()
+                .all(|ufw| self.ancestor(ufw, event_hash))
+            {
+                let round_received = checked_round;
+                let s = todo!();
+                todo!()
+            }
+        }
+        None
+    }
+
     fn ancestor(&self, target: &event::Hash, potential_ancestor: &event::Hash) -> bool {
         // TODO: check in other way and return error???
         let _x = self.all_events.get(target).unwrap();
