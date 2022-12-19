@@ -127,6 +127,11 @@ impl<TPayload> Event<TPayload> {
     pub fn author(&self) -> &PeerId {
         &self.author
     }
+
+    pub fn timestamp(&self) -> &u64 {
+        // TODO: remove stub
+        return &123;
+    }
 }
 
 #[cfg(test)]

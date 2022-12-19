@@ -718,7 +718,7 @@ fn missing_parent_fails() {
 fn test_ancestor() {
     run_tests!(
         tested_function_name => "ancestor",
-        tested_function => |g, (e1, e2)| g.ancestor(&e1, &e2),
+        tested_function => |g, (e1, e2)| g.is_ancestor(&e1, &e2),
         name_lookup => |names, (e1, e2)| format!("({}, {})", names.get(e1).unwrap(), names.get(e2).unwrap()),
         peers_literal => peers,
         tests => [
@@ -844,7 +844,9 @@ fn test_ancestor_iter() {
     // (Iterator, Actual ancestors to compare with)
     let cases = vec![
         (
-            graph.iter(&peers.get("b").unwrap().events[3]).unwrap(),
+            graph
+                .ancestor_iter(&peers.get("b").unwrap().events[3])
+                .unwrap(),
             HashSet::<_>::from_iter(
                 [
                     &peers.get("b").unwrap().events[0..4],
@@ -857,7 +859,9 @@ fn test_ancestor_iter() {
         ),
         (
             // debugging b3 not being witness
-            graph.iter(&peers.get("b").unwrap().events[6]).unwrap(),
+            graph
+                .ancestor_iter(&peers.get("b").unwrap().events[6])
+                .unwrap(),
             HashSet::<_>::from_iter(
                 [
                     &peers.get("a").unwrap().events[0..5],

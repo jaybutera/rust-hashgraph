@@ -2,7 +2,7 @@ use itertools::izip;
 use serde::Serialize;
 use thiserror::Error;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::event::{self, Event, Parents};
 use super::index::{NodeIndex, PeerIndexEntry};
@@ -242,6 +242,8 @@ impl<TPayload: Serialize> Graph<TPayload> {
         }
         Ok(hash)
     }
+
+    pub fn next_node(&mut self) {}
 }
 
 impl<TPayload> Graph<TPayload> {
@@ -262,14 +264,26 @@ impl<TPayload> Graph<TPayload> {
     }
 
     /// Iterator over ancestors of the event
-    pub fn iter<'a>(&'a self, event_hash: &'a event::Hash) -> Option<EventIter<TPayload>> {
+    pub fn ancestor_iter<'a>(
+        &'a self,
+        event_hash: &'a event::Hash,
+    ) -> Option<AncestorIter<TPayload>> {
         let event = self.all_events.get(event_hash)?;
-        let mut e_iter = EventIter::new(&self.all_events, event_hash);
+        let mut e_iter = AncestorIter::new(&self.all_events, event_hash);
 
         if let event::Kind::Regular(_) = event.parents() {
             e_iter.push_self_ancestors(event_hash)
         }
         Some(e_iter)
+    }
+
+    /// Iterator over self ancestors of the event
+    pub fn self_ancestor_iter<'a>(
+        &'a self,
+        event_hash: &'a event::Hash,
+    ) -> Option<SelfAncestorIter<TPayload>> {
+        let iter = SelfAncestorIter::new(&self.all_events, event_hash);
+        iter
     }
 
     /// Determine the round an event belongs to, which is the max of its parents' rounds +1 if it
@@ -544,7 +558,7 @@ impl<TPayload> Graph<TPayload> {
     /// true if all known witnesses had their fame decided, for both
     /// round r and all earlier rounds (from the paper)
     fn is_round_decided(&mut self, r: usize) -> bool {
-        // TODO: check that the rounds can't be undecided for some reason
+        // TODO: check that the rounds can't become undecided for some reason
         // (shouldn't happen, right??). I assume this when saving that
 
         // Usually the last round should fail first, however not sure if it's
@@ -584,16 +598,28 @@ impl<TPayload> Graph<TPayload> {
         true
     }
 
-    /// If false, it's undecided
-    fn round_received(&mut self, event_hash: &event::Hash) -> Option<usize> {
-        // "x is an ancestor of every round r unique famous witness", where `r` is
-        // `checked_round`.
+    /// Since events are sorted firstly by `round_received` and this number is set to `x`
+    /// only when the round's ufws (unique famous witnesses) all have seen the `x`, it makes
+    /// sense to order the events in batches after each round is decided.
+    ///
+    /// Otherwise we cannot guarantee that some event unknown to ufws will not appear (which
+    /// would mean that we might skipped it already).
+    ///
+    /// It is similar to finalization notion. Basically, in such case an event is finalized
+    /// when ufws of some round all see it. It implies (at least it seems to me) that we can
+    /// univocally find its place in order of all events.
 
-        // Also we want the first round that satisfies desired condition, so we
-        // check from round of x to the latest and pick the first (or declare it
-        // undecided).
+    /// If false, it's undecided
+    /// Returns data needed for ordering??
+    fn ordering_data(&mut self, event_hash: &event::Hash) -> Option<usize> {
+        // "x is an ancestor of every round r unique famous witness", where `r` is
+        // `checked_round`. `r` is also the earliest such round.
+
+        // Since `x` is ancestor of round `r` witnesses and we search for the earliest
+        // round that satisfies the condition, we start from round of `x` forward to
+        // get `r`.
         for checked_round in self.round_of(event_hash)..self.round_index.len() {
-            // Move iteration on unique famous witnesses in a separate func (+ do
+            // TODO: Move iteration on unique famous witnesses in a separate func (+ do
             // smth with panics)
             let mut unique_famous_witnesses = vec![];
             for witness in self
@@ -602,6 +628,8 @@ impl<TPayload> Graph<TPayload> {
             {
                 match self.is_famous_witness(witness) {
                     Ok(WitnessFamousness::Undecided) => {
+                        // round before this did not satisfy our condition and later ones
+                        // are still undecided
                         return None;
                     }
                     Ok(WitnessFamousness::Yes) => {
@@ -620,24 +648,51 @@ impl<TPayload> Graph<TPayload> {
                     }
                 }
             }
+            // Is `x` an ancestor of every round `r` unique famous witness?
             if unique_famous_witnesses
                 .iter()
-                .all(|ufw| self.ancestor(ufw, event_hash))
+                .all(|ufw| self.is_ancestor(ufw, event_hash))
             {
                 let round_received = checked_round;
-                let s = todo!();
-                todo!()
+
+                // set of each event z such that z is
+                // a self-ancestor of a round r unique famous
+                // witness, and x is an ancestor of z but not
+                // of the self-parent of z
+                let s = unique_famous_witnesses.iter().filter_map(|ufw| {
+                    let mut self_ancestors = self
+                        .self_ancestor_iter(ufw)
+                        .expect("all self ancestors of unique famous witness must be known");
+                    // we want to keep track of possible z event
+                    let mut first_descendant_event_candidate = self_ancestors
+                        .next()
+                        .expect("at least 1 self-ancestor must be present - the event itself");
+                    for next_ufw_ancestor in self_ancestors {
+                        if !self.is_ancestor(next_ufw_ancestor.hash(), event_hash) {
+                            return Some(first_descendant_event_candidate);
+                        }
+                        first_descendant_event_candidate = next_ufw_ancestor
+                    }
+                    // all self-ancestors of `ufw` (unique famous witness) are descendants of `x`
+                    // so it should mean that x is genesis and the ufw is self-descendant.
+
+                    // just ignore it, since it doesn't satisfy our condition
+                    None
+                });
+                let mut timestamps: Vec<_> = s.map(|event| event.timestamp()).collect();
+                timestamps.sort();
+                timestamps[timestamps.len() / 2]
             }
         }
         None
     }
 
-    fn ancestor(&self, target: &event::Hash, potential_ancestor: &event::Hash) -> bool {
+    fn is_ancestor(&self, target: &event::Hash, potential_ancestor: &event::Hash) -> bool {
         // TODO: check in other way and return error???
         let _x = self.all_events.get(target).unwrap();
         let _y = self.all_events.get(potential_ancestor).unwrap();
 
-        self.iter(target)
+        self.ancestor_iter(target)
             .unwrap()
             .any(|e| e.hash() == potential_ancestor)
     }
@@ -646,7 +701,7 @@ impl<TPayload> Graph<TPayload> {
     /// ancestor of observer.
     fn see(&self, observer: &event::Hash, target: &event::Hash) -> bool {
         // TODO: add fork check
-        return self.ancestor(observer, target);
+        return self.is_ancestor(observer, target);
     }
 
     /// Event `observer` strongly sees `target` through more than 2n/3 members.
@@ -655,7 +710,7 @@ impl<TPayload> Graph<TPayload> {
     fn strongly_see(&self, observer: &event::Hash, target: &event::Hash) -> bool {
         // TODO: Check fork conditions
         let authors_seen = self
-            .iter(observer)
+            .ancestor_iter(observer)
             .unwrap()
             .filter(|e| self.see(&e.hash(), target))
             .fold(HashSet::new(), |mut set, event| {
@@ -668,18 +723,18 @@ impl<TPayload> Graph<TPayload> {
     }
 }
 
-pub struct EventIter<'a, T> {
+pub struct AncestorIter<'a, T> {
     node_list: Vec<&'a Event<T>>,
     all_events: &'a HashMap<event::Hash, Event<T>>,
     visited_events: HashSet<&'a event::Hash>,
 }
 
-impl<'a, T> EventIter<'a, T> {
+impl<'a, T> AncestorIter<'a, T> {
     pub fn new(
         all_events: &'a HashMap<event::Hash, Event<T>>,
         ancestors_of: &'a event::Hash,
     ) -> Self {
-        let mut iter = EventIter {
+        let mut iter = AncestorIter {
             node_list: vec![],
             all_events: all_events,
             visited_events: HashSet::new(),
@@ -711,7 +766,7 @@ impl<'a, T> EventIter<'a, T> {
     }
 }
 
-impl<'a, T> Iterator for EventIter<'a, T> {
+impl<'a, T> Iterator for AncestorIter<'a, T> {
     type Item = &'a Event<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -721,6 +776,44 @@ impl<'a, T> Iterator for EventIter<'a, T> {
             self.push_self_ancestors(other_parent);
         }
         Some(event)
+    }
+}
+
+pub struct SelfAncestorIter<'a, T> {
+    node_list: VecDeque<&'a Event<T>>,
+}
+
+impl<'a, T> SelfAncestorIter<'a, T> {
+    pub fn new(
+        all_events: &'a HashMap<event::Hash, Event<T>>,
+        ancestors_of: &'a event::Hash,
+    ) -> Option<Self> {
+        let mut node_list = VecDeque::new();
+        let mut next_event_hash = ancestors_of;
+        loop {
+            let next_event = all_events.get(next_event_hash)?;
+            node_list.push_back(next_event);
+            if let event::Kind::Regular(Parents { self_parent, .. }) = next_event.parents() {
+                next_event_hash = self_parent
+            } else {
+                break;
+            }
+        }
+        Some(Self { node_list })
+    }
+}
+
+impl<'a, T> Iterator for SelfAncestorIter<'a, T> {
+    type Item = &'a Event<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.node_list.pop_front()
+    }
+}
+
+impl<'a, T> DoubleEndedIterator for SelfAncestorIter<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.node_list.pop_back()
     }
 }
 
