@@ -4,10 +4,14 @@ use thiserror::Error;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use self::ordering::OrderedEvents;
+
 use super::event::{self, Event, Parents};
 use super::index::{NodeIndex, PeerIndexEntry};
 use super::{PushError, PushKind, RoundNum};
 use crate::PeerId;
+
+mod ordering;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum WitnessFamousness {
@@ -74,6 +78,22 @@ pub enum WitnessCheckError {
 #[error("Event with such hash is unknown to the graph")]
 pub struct UnknownEvent;
 
+#[derive(Error, Debug, PartialEq)]
+pub enum RoundUfwListError {
+    #[error("Round with this number is unknown yet")]
+    UnknownRound,
+    #[error("Fame of some witnesses in the round is undecided")]
+    RoundUndecided,
+}
+
+#[derive(Error, Debug, PartialEq)]
+pub enum OrderingDataError {
+    #[error("No event with such hash is tracked")]
+    UnknownEvent,
+    #[error("Ordering for the event is undecided")]
+    Undecided,
+}
+
 pub struct Graph<TPayload> {
     all_events: NodeIndex<Event<TPayload>>,
     peer_index: HashMap<PeerId, PeerIndexEntry>,
@@ -83,8 +103,12 @@ pub struct Graph<TPayload> {
     witnesses: HashMap<event::Hash, WitnessFamousness>,
     /// Cache, shouldn't be relied upon (however seems as reliable as `round_index`)
     round_of: HashMap<event::Hash, RoundNum>,
-    /// If round # is in the set - it's decided
-    rounds_decided_cache: HashSet<usize>,
+    /// The latest round known to be decided. By definition of decided round,
+    /// all previous rounds to it are decided as well.
+    ///
+    /// If `None` - no rounds decided yet
+    last_known_decided_round: Option<usize>,
+    ordering: OrderedEvents,
 
     // probably move to config later
     self_id: PeerId,
@@ -101,7 +125,8 @@ impl<T: Serialize> Graph<T> {
             round_index: vec![HashSet::new()],
             witnesses: HashMap::new(),
             round_of: HashMap::new(),
-            rounds_decided_cache: HashSet::new(),
+            last_known_decided_round: None,
+            ordering: OrderedEvents::new(),
             coin_frequency,
         };
 
@@ -171,13 +196,6 @@ impl<TPayload: Serialize> Graph<TPayload> {
                     ));
                 }
 
-                // if let Some(existing_child) = &self_parent_node.children.self_child {
-                //     // Should not happen since latest events should not have self children
-
-                //     // TODO: insert with self_parent as hash and handle fork insertion.
-                //     return Err(PushError::SelfChildAlreadyExists(existing_child.clone()));
-                // }
-
                 // taking mutable for update later
                 let author_index = self
                     .peer_index
@@ -188,8 +206,7 @@ impl<TPayload: Serialize> Graph<TPayload> {
 
                 // update pointers of parents
                 if let Some(sibling) = self_parent_node.children.self_child.get(0) {
-                    // TODO: handle fork insertion somehow or check if it's handled?.
-                    // Track the fork
+                    // Track the fork. Add is idempotent, so it's ok to add the sibling.
                     author_index.add_fork(self_parent_node.hash().clone(), sibling.clone());
                     author_index.add_fork(self_parent_node.hash().clone(), new_node.hash().clone());
                 }
@@ -239,11 +256,16 @@ impl<TPayload: Serialize> Graph<TPayload> {
         {
             self.witnesses
                 .insert(hash.clone(), WitnessFamousness::Undecided);
+
+            // Update fame of previous rounds, if changed
+            self.decide_rounds();
         }
         Ok(hash)
     }
 
-    pub fn next_node(&mut self) {}
+    pub fn next_node(&mut self) {
+        // self.ordering
+    }
 }
 
 impl<TPayload> Graph<TPayload> {
@@ -347,6 +369,32 @@ impl<TPayload> Graph<TPayload> {
                 .filter(|e| self.witnesses.contains_key(e))
                 .collect(),
         )
+    }
+
+    fn round_unique_famous_witnesses(
+        &self,
+        r: usize,
+    ) -> Result<HashSet<&event::Hash>, RoundUfwListError> {
+        let round_index = self
+            .round_index
+            .get(r)
+            .ok_or(RoundUfwListError::UnknownRound)?;
+        if round_index
+            .iter()
+            .map(|e| self.is_unique_famous_witness(e))
+            .any(|ufw_res| matches!(ufw_res, Ok(WitnessUniqueFamousness::Undecided)))
+        {
+            return Err(RoundUfwListError::RoundUndecided);
+        }
+        Ok(round_index
+            .iter()
+            .filter(|e| {
+                matches!(
+                    self.is_unique_famous_witness(e),
+                    Ok(WitnessUniqueFamousness::FamousUnique)
+                )
+            })
+            .collect())
     }
 }
 
@@ -463,7 +511,7 @@ impl<TPayload> Graph<TPayload> {
                         // TODO: move supermajority cond to func
                         // if supermajority, then decide
                         let fame = match v {
-                            // Maybe save the result?? shouldn't change if decided, right?
+                            // TODO: Maybe save the result?? shouldn't change if decided, right?
                             true => WitnessFamousness::Yes,
                             false => WitnessFamousness::No,
                         };
@@ -484,7 +532,7 @@ impl<TPayload> Graph<TPayload> {
                                 .all_events
                                 .get(y_hash)
                                 .expect("Inconsistent graph state") //TODO: turn to error
-                                .hash()
+                                .signature()
                                 .as_ref();
                             let middle_bit_index = y_sig.len() * 8 / 2;
                             let middle_byte_index = middle_bit_index / 8;
@@ -552,7 +600,23 @@ impl<TPayload> Graph<TPayload> {
         let unique = !same_creator_round_fame
             .iter()
             .any(|fame| matches!(fame, Ok(WitnessFamousness::Yes)));
+
+        // TODO: cache?
         Ok(WitnessUniqueFamousness::from_famousness(fame, unique))
+    }
+
+    fn is_round_decided_before(&self, r: usize) -> bool {
+        self.last_known_decided_round
+            .map_or(false, |decided| decided >= r)
+    }
+
+    /// Checks if some new rounds were decided and aknowledges this
+    /// by updating `last_known_decided_round`
+    fn decide_rounds(&mut self) {
+        let mut next_round_to_decide = self.last_known_decided_round.map(|a| a + 1).unwrap_or(0);
+        while self.is_round_decided(next_round_to_decide) {
+            next_round_to_decide += 1;
+        }
     }
 
     /// true if all known witnesses had their fame decided, for both
@@ -564,7 +628,7 @@ impl<TPayload> Graph<TPayload> {
         // Usually the last round should fail first, however not sure if it's
         // cheaper to compute from the end.
         for checked_round in (0..=r).rev() {
-            if self.rounds_decided_cache.contains(&checked_round) {
+            if self.is_round_decided_before(checked_round) {
                 continue;
             }
             let round_witnesses = if let Some(i) = self.round_witnesses(r) {
@@ -592,12 +656,23 @@ impl<TPayload> Graph<TPayload> {
             }
             // At this point we know that round `checked_round` is decided
             // we should be safe to save this not to recompute it later
-            self.rounds_decided_cache.insert(checked_round);
+            self.last_known_decided_round
+                .map_or(checked_round, |d| d.max(checked_round));
+
+            self.add_new_ordered_events(checked_round);
         }
         // This and all previous rounds were decided
         true
     }
 
+    /// # Description
+    ///
+    /// Update `ordering` index/tracker to include newly ordered events. These are events
+    /// that have `round_decided` <= `last_known_decided_round`. It is used to later
+    /// provide events one by one.
+    ///
+    /// # Explanation
+    ///
     /// Since events are sorted firstly by `round_received` and this number is set to `x`
     /// only when the round's ufws (unique famous witnesses) all have seen the `x`, it makes
     /// sense to order the events in batches after each round is decided.
@@ -608,10 +683,48 @@ impl<TPayload> Graph<TPayload> {
     /// It is similar to finalization notion. Basically, in such case an event is finalized
     /// when ufws of some round all see it. It implies (at least it seems to me) that we can
     /// univocally find its place in order of all events.
+    fn add_new_ordered_events(&mut self) {
 
-    /// If false, it's undecided
-    /// Returns data needed for ordering??
-    fn ordering_data(&mut self, event_hash: &event::Hash) -> Option<usize> {
+        // self.ordering
+        //     .add_received_round(new_decided_round, events, unique_famous_witness_sigs)
+    }
+
+    /// Get events ordered by round `new_decided_round` in no particular order.
+    fn ordered_events(&mut self, new_decided_round: usize) -> Vec<event::Hash> {
+        for (_peer_id, index) in self.peer_index {}
+    }
+
+    ///
+    ///
+    /// TODO: check if we need to order forks? Probably yes and indicate them when giving back.
+    fn ordered_events_for_peer(
+        &self,
+        new_decided_round: usize,
+        peer_index: &mut PeerIndexEntry,
+    ) -> Vec<event::Hash> {
+    }
+
+    /// # Description
+    ///
+    /// Data needed for ordering an event. To be more precise, it consists of
+    ///
+    /// # Return value
+    ///
+    /// If `None`, then it's undecided yet.
+    /// Otherwise it consists of
+    /// `(round received, consensus timestamp, event signature)`.
+    /// `round received` can be understood as the round this event is finalized.
+    fn ordering_data(
+        &self,
+        event_hash: &event::Hash,
+    ) -> Result<(usize, u64, event::Hash), OrderingDataError> {
+        // check that the event is known in advance
+        let event_signature = self
+            .all_events
+            .get(event_hash)
+            .ok_or(OrderingDataError::UnknownEvent)?
+            .signature();
+
         // "x is an ancestor of every round r unique famous witness", where `r` is
         // `checked_round`. `r` is also the earliest such round.
 
@@ -621,40 +734,20 @@ impl<TPayload> Graph<TPayload> {
         for checked_round in self.round_of(event_hash)..self.round_index.len() {
             // TODO: Move iteration on unique famous witnesses in a separate func (+ do
             // smth with panics)
-            let mut unique_famous_witnesses = vec![];
-            for witness in self
-                .round_witnesses(checked_round)
-                .expect("Inconsistent state between `round_of` and `round_index`")
-            {
-                match self.is_famous_witness(witness) {
-                    Ok(WitnessFamousness::Undecided) => {
-                        // round before this did not satisfy our condition and later ones
-                        // are still undecided
-                        return None;
-                    }
-                    Ok(WitnessFamousness::Yes) => {
-                        unique_famous_witnesses.push(witness);
-                    }
-                    Ok(WitnessFamousness::No) => {
-                        continue;
-                    }
-                    Err(WitnessCheckError::NotWitness) => {
-                        // TODO: warn?? or smth, maybe separate error
-                        panic!("Witnesses index or witness check is broken, inconsistent state");
-                    }
-                    Err(WitnessCheckError::Unknown(_)) => {
-                        // TODO: warn?? or smth, maybe separate error
-                        panic!("Witnesses index or something else is broken, inconsistent state");
-                    }
+            let unique_famous_witnesses = match self.round_unique_famous_witnesses(checked_round) {
+                Ok(list) => list,
+                // round before this did not satisfy our condition and later ones
+                // are still undecided
+                Err(RoundUfwListError::RoundUndecided) => return Err(OrderingDataError::Undecided),
+                Err(RoundUfwListError::UnknownRound) => {
+                    panic!("`checked_round` range boundary must not allow this")
                 }
-            }
+            };
             // Is `x` an ancestor of every round `r` unique famous witness?
             if unique_famous_witnesses
                 .iter()
                 .all(|ufw| self.is_ancestor(ufw, event_hash))
             {
-                let round_received = checked_round;
-
                 // set of each event z such that z is
                 // a self-ancestor of a round r unique famous
                 // witness, and x is an ancestor of z but not
@@ -681,10 +774,11 @@ impl<TPayload> Graph<TPayload> {
                 });
                 let mut timestamps: Vec<_> = s.map(|event| event.timestamp()).collect();
                 timestamps.sort();
-                timestamps[timestamps.len() / 2]
+                let consensus_timestamp = timestamps[timestamps.len() / 2];
+                return Ok((checked_round, *consensus_timestamp, event_signature.clone()));
             }
         }
-        None
+        Err(OrderingDataError::Undecided)
     }
 
     fn is_ancestor(&self, target: &event::Hash, potential_ancestor: &event::Hash) -> bool {

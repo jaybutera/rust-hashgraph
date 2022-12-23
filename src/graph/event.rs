@@ -5,7 +5,7 @@ use serde_big_array::BigArray;
 use crate::PeerId;
 
 // smth like H256 ??? (some hash type)
-#[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
+#[derive(Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug)]
 pub struct Hash {
     #[serde(with = "BigArray")]
     inner: [u8; 64],
@@ -14,6 +14,29 @@ pub struct Hash {
 impl std::fmt::Display for Hash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:X?}", self.inner)
+    }
+}
+
+impl std::ops::BitXor for &Hash {
+    type Output = Hash;
+
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        let mut result = [0u8; 64];
+        for (i, (b1, b2)) in self.inner.iter().zip(rhs.inner.iter()).enumerate() {
+            result[i] = b1 ^ b2;
+        }
+        Hash::from_array(result)
+    }
+}
+
+impl std::ops::BitXor<&Hash> for Hash {
+    type Output = Hash;
+
+    fn bitxor(mut self, rhs: &Self) -> Self::Output {
+        for i in 0..self.inner.len() {
+            self.inner[i] ^= rhs.inner[i];
+        }
+        self
     }
 }
 
@@ -114,6 +137,11 @@ impl<TPayload: Serialize> Event<TPayload> {
 impl<TPayload> Event<TPayload> {
     pub fn hash(&self) -> &Hash {
         &self.id
+    }
+
+    // TODO: actually have signature
+    pub fn signature(&self) -> &Hash {
+        self.hash()
     }
 
     pub fn parents(&self) -> &Kind {

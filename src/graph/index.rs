@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use super::event;
+use super::{datastructure::UnknownEvent, event};
 
 pub type NodeIndex<TIndexPayload> = HashMap<event::Hash, TIndexPayload>;
 
@@ -15,6 +15,7 @@ pub struct PeerIndexEntry {
     forks: HashMap<event::Hash, HashSet<event::Hash>>,
     // Genesis at start
     latest_event: event::Hash,
+    latest_finalized_event: Option<event::Hash>,
 }
 
 impl PeerIndexEntry {
@@ -25,6 +26,7 @@ impl PeerIndexEntry {
             authored_events: HashMap::new(),
             forks: HashMap::new(),
             latest_event,
+            latest_finalized_event: None,
         }
     }
 
@@ -39,13 +41,27 @@ impl PeerIndexEntry {
         }
     }
 
+    /// Idempotent, i.e. adding already tracked fork won't change anything
     pub fn add_fork(&mut self, parent: event::Hash, child: event::Hash) {
         let fork_list = self.forks.entry(parent).or_default();
         fork_list.insert(child);
     }
 
+    pub fn update_latest_finalized(&mut self, event: event::Hash) -> Result<(), UnknownEvent> {
+        if !self.authored_events.contains_key(&event) {
+            Err(UnknownEvent)
+        } else {
+            self.latest_finalized_event = Some(event);
+            Ok(())
+        }
+    }
+
     pub fn latest_event(&self) -> &event::Hash {
         &self.latest_event
+    }
+
+    pub fn latest_finalized_event(&self) -> Option<&event::Hash> {
+        self.latest_finalized_event.as_ref()
     }
 
     pub fn genesis(&self) -> &event::Hash {

@@ -1,0 +1,104 @@
+use std::collections::HashMap;
+
+use thiserror::Error;
+
+use crate::{graph::event, PeerId};
+
+/// Stores finalized/ordered events. We know the order of events that a
+/// decided round "sees" (not actually sees as definition says but has
+/// the round as ancestor, it's mostly a formality though). Such round
+/// is also called `round received`
+pub struct OrderedEvents {
+    // None - no rounds were ordered (because first round is 0)
+    latest_decided_round: Option<usize>,
+    //
+    next_event_to_finalize_by_peer: HashMap<PeerId, event::Hash>,
+    // Events ordered according to algorithm
+    events: Vec<OrderedEventsEntry>,
+    // For iteration
+    next_element_to_access: usize,
+}
+
+// Ordering-related data about event
+struct OrderedEventsEntry {
+    hash: event::Hash,
+    round_received: usize,
+    consensus_timestamp: u64,        // ???
+    whitened_signature: event::Hash, // TODO: use actual signature
+}
+
+impl OrderedEvents {
+    pub fn new() -> Self {
+        Self {
+            latest_decided_round: None,
+            next_event_to_finalize_by_peer: HashMap::new(),
+            events: vec![],
+            next_element_to_access: 0,
+        }
+    }
+
+    /// We need to supply events by each subsequent `round received`
+    ///
+    /// `events` contains `(event hash, consensus timestamp, event signature)`
+    /// `unique_famous_witness_sigs` is needed for sig whitening
+    pub fn add_received_round(
+        &mut self,
+        round: usize,
+        events: impl Iterator<Item = (event::Hash, u64, event::Hash)>, // TODO: use newtypes where applicable
+        unique_famous_witness_sigs: Vec<event::Hash>,
+    ) -> Result<(), RoundAddError> {
+        self.verify_round_number(round)?;
+
+        // XOR is associative + commutative, so we can combine ufw sigs
+        // to not recompute it each time
+        let ufw_sigs_combined = Self::combine_sigs_xor(unique_famous_witness_sigs.into_iter());
+        let mut events: Vec<_> = events
+            .map(|(a, b, sig)| (a, b, sig ^ &ufw_sigs_combined))
+            .collect();
+
+        // Sort according to paper: first by timestamp then by whitened signature
+        events.sort_by(
+            |(_, timestamp1, whitened_sig1), (_, timestamp2, whitened_sig2)| {
+                timestamp1
+                    .cmp(timestamp2)
+                    .then(whitened_sig1.cmp(whitened_sig2))
+            },
+        );
+
+        // Update state
+        let mut events: Vec<_> = events
+            .into_iter()
+            .map(
+                |(hash, consensus_timestamp, whitened_signature)| OrderedEventsEntry {
+                    hash,
+                    round_received: round,
+                    consensus_timestamp,
+                    whitened_signature,
+                },
+            )
+            .collect();
+        self.events.append(&mut events);
+        self.latest_decided_round = Some(self.latest_decided_round.map_or(0, |r| r + 1));
+        Ok(())
+    }
+
+    fn verify_round_number(&self, r: usize) -> Result<(), RoundAddError> {
+        match self.latest_decided_round {
+            Some(ordered) => r == ordered + 1,
+            None => r == 0,
+        }
+        .then_some(())
+        .ok_or(RoundAddError::IncorrectRoundNumber)
+    }
+
+    fn combine_sigs_xor(sigs: impl Iterator<Item = event::Hash>) -> event::Hash {
+        sigs.into_iter()
+            .fold(event::Hash::from_array([0u8; 64]), |acc, next| acc ^ &next)
+    }
+}
+
+#[derive(Error, Debug)]
+enum RoundAddError {
+    #[error("Round right after previously supplied should be provided")]
+    IncorrectRoundNumber,
+}
