@@ -1,8 +1,6 @@
-use std::collections::HashMap;
-
 use thiserror::Error;
 
-use crate::{graph::event, PeerId};
+use crate::graph::event;
 
 /// Stores finalized/ordered events. We know the order of events that a
 /// decided round "sees" (not actually sees as definition says but has
@@ -11,8 +9,6 @@ use crate::{graph::event, PeerId};
 pub struct OrderedEvents {
     // None - no rounds were ordered (because first round is 0)
     latest_ordered_round: Option<usize>,
-    //
-    next_event_to_finalize_by_peer: HashMap<PeerId, event::Hash>,
     // Events ordered according to algorithm
     events: Vec<OrderedEventsEntry>,
     // For iteration
@@ -22,16 +18,17 @@ pub struct OrderedEvents {
 // Ordering-related data about event
 struct OrderedEventsEntry {
     hash: event::Hash,
-    round_received: usize,
-    consensus_timestamp: u64,        // ???
-    whitened_signature: event::Hash, // TODO: use actual signature
+    // Do we need to store these fields??
+
+    // round_received: usize,
+    // consensus_timestamp: u64,        // ???
+    // whitened_signature: event::Hash, // TODO: use actual signature
 }
 
 impl OrderedEvents {
     pub fn new() -> Self {
         Self {
             latest_ordered_round: None,
-            next_event_to_finalize_by_peer: HashMap::new(),
             events: vec![],
             next_element_to_access: 0,
         }
@@ -69,11 +66,11 @@ impl OrderedEvents {
         let mut events: Vec<_> = events
             .into_iter()
             .map(
-                |(hash, consensus_timestamp, whitened_signature)| OrderedEventsEntry {
+                |(hash, _consensus_timestamp, _whitened_signature)| OrderedEventsEntry {
                     hash,
-                    round_received: round,
-                    consensus_timestamp,
-                    whitened_signature,
+                    // round_received: round,
+                    // consensus_timestamp,
+                    // whitened_signature,
                 },
             )
             .collect();
@@ -87,6 +84,12 @@ impl OrderedEvents {
             Some(ordered) => ordered + 1,
             None => 0,
         }
+    }
+
+    pub fn next_event(&mut self) -> Option<&event::Hash> {
+        let event_data = self.events.get(self.next_element_to_access)?;
+        self.next_element_to_access += 1;
+        Some(&event_data.hash)
     }
 
     fn verify_round_number(&self, r: usize) -> Result<(), RoundAddError> {

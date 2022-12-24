@@ -279,8 +279,12 @@ where
         Ok(hash)
     }
 
-    pub fn next_node(&mut self) {
-        // self.ordering
+    pub fn next_node(&mut self) -> Option<&Event<TPayload>> {
+        self.ordering.next_event().map(|hash| {
+            self.all_events
+                .get(hash)
+                .expect("ordered events must be tracked")
+        })
     }
 }
 
