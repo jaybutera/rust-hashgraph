@@ -10,7 +10,7 @@ use crate::{graph::event, PeerId};
 /// is also called `round received`
 pub struct OrderedEvents {
     // None - no rounds were ordered (because first round is 0)
-    latest_decided_round: Option<usize>,
+    latest_ordered_round: Option<usize>,
     //
     next_event_to_finalize_by_peer: HashMap<PeerId, event::Hash>,
     // Events ordered according to algorithm
@@ -30,7 +30,7 @@ struct OrderedEventsEntry {
 impl OrderedEvents {
     pub fn new() -> Self {
         Self {
-            latest_decided_round: None,
+            latest_ordered_round: None,
             next_event_to_finalize_by_peer: HashMap::new(),
             events: vec![],
             next_element_to_access: 0,
@@ -78,17 +78,21 @@ impl OrderedEvents {
             )
             .collect();
         self.events.append(&mut events);
-        self.latest_decided_round = Some(self.latest_decided_round.map_or(0, |r| r + 1));
+        self.latest_ordered_round = Some(self.latest_ordered_round.map_or(0, |r| r + 1));
         Ok(())
     }
 
-    fn verify_round_number(&self, r: usize) -> Result<(), RoundAddError> {
-        match self.latest_decided_round {
-            Some(ordered) => r == ordered + 1,
-            None => r == 0,
+    pub fn next_round_to_order(&self) -> usize {
+        match self.latest_ordered_round {
+            Some(ordered) => ordered + 1,
+            None => 0,
         }
-        .then_some(())
-        .ok_or(RoundAddError::IncorrectRoundNumber)
+    }
+
+    fn verify_round_number(&self, r: usize) -> Result<(), RoundAddError> {
+        (r == self.next_round_to_order())
+            .then_some(())
+            .ok_or(RoundAddError::IncorrectRoundNumber)
     }
 
     fn combine_sigs_xor(sigs: impl Iterator<Item = event::Hash>) -> event::Hash {
@@ -98,7 +102,7 @@ impl OrderedEvents {
 }
 
 #[derive(Error, Debug)]
-enum RoundAddError {
+pub enum RoundAddError {
     #[error("Round right after previously supplied should be provided")]
     IncorrectRoundNumber,
 }

@@ -1,4 +1,4 @@
-use std::{iter::repeat, ops::Deref};
+use std::{hash::Hash, iter::repeat, ops::Deref};
 
 use super::*;
 
@@ -308,7 +308,7 @@ fn add_events<T, TIter>(
     PushError,
 >
 where
-    T: Serialize + Copy + Default,
+    T: Serialize + Copy + Default + Eq + Hash,
     TIter: Iterator<Item = T>,
 {
     let mut inserted_events = HashMap::with_capacity(events.len());
@@ -403,12 +403,15 @@ where
     Ok((peers_events, names))
 }
 
-fn add_geneses<T: Serialize + Copy>(
+fn add_geneses<T>(
     graph: &mut Graph<T>,
     this_author: &str,
     author_ids: &HashMap<&'static str, PeerId>,
     payload: T,
-) -> Result<HashMap<event::Hash, String>, PushError> {
+) -> Result<HashMap<event::Hash, String>, PushError>
+where
+    T: Serialize + Copy + Eq + Hash,
+{
     let mut names = HashMap::with_capacity(author_ids.len());
 
     for (&name, id) in author_ids {
@@ -425,10 +428,10 @@ fn add_geneses<T: Serialize + Copy>(
     Ok(names)
 }
 
-fn build_graph_from_paper<T: Serialize + Copy + Default>(
-    payload: T,
-    coin_frequency: usize,
-) -> Result<TestSetup<T>, PushError> {
+fn build_graph_from_paper<T>(payload: T, coin_frequency: usize) -> Result<TestSetup<T>, PushError>
+where
+    T: Serialize + Copy + Default + Eq + Hash,
+{
     let author_ids = HashMap::from([("a", 0), ("b", 1), ("c", 2), ("d", 3), ("e", 4)]);
     let mut graph = Graph::new(*author_ids.get("a").unwrap(), payload, coin_frequency);
     let mut names = add_geneses(&mut graph, "a", &author_ids, payload)?;
@@ -457,10 +460,10 @@ fn build_graph_from_paper<T: Serialize + Copy + Default>(
     })
 }
 
-fn build_graph_some_chain<T: Serialize + Copy + Default>(
-    payload: T,
-    coin_frequency: usize,
-) -> Result<TestSetup<T>, PushError> {
+fn build_graph_some_chain<T>(payload: T, coin_frequency: usize) -> Result<TestSetup<T>, PushError>
+where
+    T: Serialize + Copy + Default + Eq + Hash,
+{
     /* Generates the following graph for each member (c1,c2,c3)
      *
         |  o__|  -- e7
@@ -496,10 +499,13 @@ fn build_graph_some_chain<T: Serialize + Copy + Default>(
     })
 }
 
-fn build_graph_detailed_example<T: Serialize + Copy + Default>(
+fn build_graph_detailed_example<T>(
     payload: T,
     coin_frequency: usize,
-) -> Result<TestSetup<T>, PushError> {
+) -> Result<TestSetup<T>, PushError>
+where
+    T: Serialize + Copy + Default + Eq + Hash,
+{
     // Defines graph from paper HASHGRAPH CONSENSUS: DETAILED EXAMPLES
     // https://www.swirlds.com/downloads/SWIRLDS-TR-2016-02.pdf
     // also in resources/graph_example.png
@@ -562,7 +568,7 @@ fn build_graph_fork<T, TIter>(
     coin_frequency: usize,
 ) -> Result<TestSetup<T>, PushError>
 where
-    T: Serialize + Copy + Default,
+    T: Serialize + Copy + Default + Eq + Hash,
     TIter: Iterator<Item = T>,
 {
     // Graph to test fork handling
@@ -606,10 +612,10 @@ where
     })
 }
 
-fn build_graph_index_test<T: Serialize + Copy + Default>(
-    payload: T,
-    coin_frequency: usize,
-) -> Result<TestSetup<T>, PushError> {
+fn build_graph_index_test<T>(payload: T, coin_frequency: usize) -> Result<TestSetup<T>, PushError>
+where
+    T: Serialize + Copy + Default + Eq + Hash,
+{
     // Graph to test round_index assignment. It seems that the logic is broken slightly,
     // this should fail with existing impl.
     let author_ids = HashMap::from([("a", 0), ("b", 1), ("c", 2), ("d", 3)]);

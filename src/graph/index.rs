@@ -8,8 +8,8 @@ pub struct PeerIndexEntry {
     genesis: event::Hash,
     /// Use `add_latest` for insertion
     authored_events: NodeIndex<()>,
-    /// Forks authored by the peer that we've observed. Forks are events that have the same
-    /// `self_parent`
+    /// Forks authored by the peer that we've observed. Forks are events
+    /// that have the same `self_parent`.
     ///
     /// Represented by a mapping from `self_parent` to the forked events
     forks: HashMap<event::Hash, HashSet<event::Hash>>,

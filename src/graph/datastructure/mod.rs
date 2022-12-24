@@ -94,6 +94,14 @@ pub enum OrderingDataError {
     Undecided,
 }
 
+#[derive(Error, Debug, PartialEq)]
+pub enum OrderedEventsError {
+    #[error("Provided round number is not present in the graph")]
+    UnknownRound,
+    #[error("Given round is undecided")]
+    UndecidedRound,
+}
+
 pub struct Graph<TPayload> {
     all_events: NodeIndex<Event<TPayload>>,
     peer_index: HashMap<PeerId, PeerIndexEntry>,
@@ -103,6 +111,7 @@ pub struct Graph<TPayload> {
     witnesses: HashMap<event::Hash, WitnessFamousness>,
     /// Cache, shouldn't be relied upon (however seems as reliable as `round_index`)
     round_of: HashMap<event::Hash, RoundNum>,
+    ordering_data_cache: HashMap<event::Hash, (usize, u64, event::Hash)>,
     /// The latest round known to be decided. By definition of decided round,
     /// all previous rounds to it are decided as well.
     ///
@@ -116,7 +125,10 @@ pub struct Graph<TPayload> {
     coin_frequency: usize,
 }
 
-impl<T: Serialize> Graph<T> {
+impl<T> Graph<T>
+where
+    T: Serialize + Eq + std::hash::Hash,
+{
     pub fn new(self_id: PeerId, genesis_payload: T, coin_frequency: usize) -> Self {
         let mut graph = Self {
             all_events: HashMap::new(),
@@ -125,6 +137,7 @@ impl<T: Serialize> Graph<T> {
             round_index: vec![HashSet::new()],
             witnesses: HashMap::new(),
             round_of: HashMap::new(),
+            ordering_data_cache: HashMap::new(),
             last_known_decided_round: None,
             ordering: OrderedEvents::new(),
             coin_frequency,
@@ -137,7 +150,10 @@ impl<T: Serialize> Graph<T> {
     }
 }
 
-impl<TPayload: Serialize> Graph<TPayload> {
+impl<TPayload> Graph<TPayload>
+where
+    TPayload: Serialize + Eq + std::hash::Hash,
+{
     /// Create and push node to the graph, adding it at the end of `author`'s lane
     /// (i.e. the node becomes the latest event of the peer).
     pub fn push_node(
@@ -265,6 +281,180 @@ impl<TPayload: Serialize> Graph<TPayload> {
 
     pub fn next_node(&mut self) {
         // self.ordering
+    }
+}
+
+impl<TPayload> Graph<TPayload>
+where
+    TPayload: Eq + std::hash::Hash,
+{
+    /// Checks if some new rounds were decided and aknowledges this
+    /// by updating `last_known_decided_round`
+    fn decide_rounds(&mut self) {
+        let mut next_round_to_decide = self.last_known_decided_round.map(|a| a + 1).unwrap_or(0);
+        while self.is_round_decided(next_round_to_decide) {
+            next_round_to_decide += 1;
+        }
+    }
+
+    /// true if all known witnesses had their fame decided, for both
+    /// round r and all earlier rounds (from the paper)
+    fn is_round_decided(&mut self, r: usize) -> bool {
+        // TODO: check that the rounds can't become undecided for some reason
+        // (shouldn't happen, right??). I assume this when saving that
+
+        // Usually the last round should fail first, however not sure if it's
+        // cheaper to compute from the end.
+        for checked_round in (0..=r).rev() {
+            if self.is_round_decided_before(checked_round) {
+                continue;
+            }
+            let round_witnesses = if let Some(i) = self.round_witnesses(r) {
+                i
+            } else {
+                return false;
+            };
+            for event_hash in round_witnesses {
+                match self.is_famous_witness(event_hash) {
+                    Ok(WitnessFamousness::Undecided) => {
+                        return false;
+                    }
+                    Ok(_) => {
+                        continue;
+                    }
+                    Err(WitnessCheckError::NotWitness) => {
+                        // TODO: warn?? or smth, maybe separate error
+                        panic!("Witnesses index or witness check is broken, inconsistent state");
+                    }
+                    Err(WitnessCheckError::Unknown(_)) => {
+                        // TODO: warn?? or smth, maybe separate error
+                        panic!("Witnesses index or something else is broken, inconsistent state");
+                    }
+                }
+            }
+            // At this point we know that round `checked_round` is decided
+            // we should be safe to save this not to recompute it later
+            self.last_known_decided_round
+                .map_or(checked_round, |d| d.max(checked_round));
+
+            self.add_new_ordered_events();
+        }
+        // This and all previous rounds were decided
+        true
+    }
+
+    /// # Description
+    ///
+    /// Update `ordering` index/tracker to include newly ordered events. These are events
+    /// that have `round_decided` <= `last_known_decided_round`. It is used to later
+    /// provide events one by one.
+    ///
+    /// # Explanation
+    ///
+    /// Since events are sorted firstly by `round_received` and this number is set to `x`
+    /// only when the round's ufws (unique famous witnesses) all have seen the `x`, it makes
+    /// sense to order the events in batches after each round is decided.
+    ///
+    /// Otherwise we cannot guarantee that some event unknown to ufws will not appear (which
+    /// would mean that we might skipped it already).
+    ///
+    /// It is similar to finalization notion. Basically, in such case an event is finalized
+    /// when ufws of some round all see it. It implies (at least it seems to me) that we can
+    /// univocally find its place in order of all events.
+    fn add_new_ordered_events(&mut self) {
+        for round in self.ordering.next_round_to_order().. {
+            if let Ok(events) = self.ordered_events(round) {
+                let ufw = self
+                    .round_unique_famous_witnesses(round)
+                    .expect("round that orders events was already checked if its fame was decided");
+                let unique_famous_witness_sigs = ufw
+                    .into_iter()
+                    .map(|e| {
+                        self.all_events
+                            .get(e)
+                            .expect("witnesses must be tracked")
+                            .signature()
+                            .clone()
+                    })
+                    .collect();
+                self.ordering
+                    .add_received_round(round, events.into_iter(), unique_famous_witness_sigs)
+                    .expect("just got round # from ordering, must be correct");
+            } else {
+                // TODO: debug log (no more ordered events found)
+                break;
+            }
+        }
+        // self.ordering
+        //     .add_received_round(new_decided_round, events, unique_famous_witness_sigs)
+    }
+
+    /// Get events to be ordered by `round` (in no particular order yet).
+    fn ordered_events(
+        &mut self,
+        round: usize,
+    ) -> Result<Vec<(event::Hash, u64, event::Hash)>, OrderedEventsError> {
+        // We create a "slice" of the network at the round witnesses and go down to find events
+        // ordered by it.
+        let mut init_slice = self
+            .round_witnesses(round)
+            .ok_or(OrderedEventsError::UnknownRound)?;
+
+        // Some peers might not have witnesses in this round, so we start from the end for them
+        let slice_extension = {
+            let peers_hit: HashSet<_> = init_slice
+                .iter()
+                .map(|h| {
+                    self.all_events
+                        .get(h)
+                        .expect("witnesses must be tracked")
+                        .author()
+                })
+                .collect();
+            let mut extension = vec![];
+            for (peer_id, index) in &self.peer_index {
+                if !peers_hit.contains(&peer_id) {
+                    extension.push(index.latest_event());
+                }
+            }
+            extension
+        };
+        init_slice.extend(slice_extension);
+
+        // Iterate from the witnesses
+        let iter = SliceIterator::new(
+            &init_slice,
+            |event: &Event<TPayload>| match self.ordering_data(event.hash()) {
+                Ok((round_received, _, _)) => round_received < round,
+                Err(OrderingDataError::Undecided) => false,
+                Err(OrderingDataError::UnknownEvent) => {
+                    panic!("events referenced in events must be tracked")
+                }
+            },
+            &self.all_events,
+        )
+        .expect("witnesses must be tracked (2)");
+
+        let mut result = vec![];
+        for event in iter {
+            match self.ordering_data(event.hash()) {
+                Ok((round_decided, consensus_timestamp, event_signature)) => {
+                    if round_decided == round {
+                        result.push((event.hash().clone(), consensus_timestamp, event_signature))
+                    } else {
+                        continue;
+                    }
+                }
+                Err(OrderingDataError::UnknownEvent) => {
+                    panic!("iterator must iterate on existing events")
+                }
+                Err(OrderingDataError::Undecided) => continue,
+            }
+        }
+        if !init_slice.is_empty() && result.is_empty() {
+            return Err(OrderedEventsError::UndecidedRound);
+        }
+        Ok(result)
     }
 }
 
@@ -610,103 +800,9 @@ impl<TPayload> Graph<TPayload> {
             .map_or(false, |decided| decided >= r)
     }
 
-    /// Checks if some new rounds were decided and aknowledges this
-    /// by updating `last_known_decided_round`
-    fn decide_rounds(&mut self) {
-        let mut next_round_to_decide = self.last_known_decided_round.map(|a| a + 1).unwrap_or(0);
-        while self.is_round_decided(next_round_to_decide) {
-            next_round_to_decide += 1;
-        }
-    }
-
-    /// true if all known witnesses had their fame decided, for both
-    /// round r and all earlier rounds (from the paper)
-    fn is_round_decided(&mut self, r: usize) -> bool {
-        // TODO: check that the rounds can't become undecided for some reason
-        // (shouldn't happen, right??). I assume this when saving that
-
-        // Usually the last round should fail first, however not sure if it's
-        // cheaper to compute from the end.
-        for checked_round in (0..=r).rev() {
-            if self.is_round_decided_before(checked_round) {
-                continue;
-            }
-            let round_witnesses = if let Some(i) = self.round_witnesses(r) {
-                i
-            } else {
-                return false;
-            };
-            for event_hash in round_witnesses {
-                match self.is_famous_witness(event_hash) {
-                    Ok(WitnessFamousness::Undecided) => {
-                        return false;
-                    }
-                    Ok(_) => {
-                        continue;
-                    }
-                    Err(WitnessCheckError::NotWitness) => {
-                        // TODO: warn?? or smth, maybe separate error
-                        panic!("Witnesses index or witness check is broken, inconsistent state");
-                    }
-                    Err(WitnessCheckError::Unknown(_)) => {
-                        // TODO: warn?? or smth, maybe separate error
-                        panic!("Witnesses index or something else is broken, inconsistent state");
-                    }
-                }
-            }
-            // At this point we know that round `checked_round` is decided
-            // we should be safe to save this not to recompute it later
-            self.last_known_decided_round
-                .map_or(checked_round, |d| d.max(checked_round));
-
-            self.add_new_ordered_events(checked_round);
-        }
-        // This and all previous rounds were decided
-        true
-    }
-
     /// # Description
     ///
-    /// Update `ordering` index/tracker to include newly ordered events. These are events
-    /// that have `round_decided` <= `last_known_decided_round`. It is used to later
-    /// provide events one by one.
-    ///
-    /// # Explanation
-    ///
-    /// Since events are sorted firstly by `round_received` and this number is set to `x`
-    /// only when the round's ufws (unique famous witnesses) all have seen the `x`, it makes
-    /// sense to order the events in batches after each round is decided.
-    ///
-    /// Otherwise we cannot guarantee that some event unknown to ufws will not appear (which
-    /// would mean that we might skipped it already).
-    ///
-    /// It is similar to finalization notion. Basically, in such case an event is finalized
-    /// when ufws of some round all see it. It implies (at least it seems to me) that we can
-    /// univocally find its place in order of all events.
-    fn add_new_ordered_events(&mut self) {
-
-        // self.ordering
-        //     .add_received_round(new_decided_round, events, unique_famous_witness_sigs)
-    }
-
-    /// Get events ordered by round `new_decided_round` in no particular order.
-    fn ordered_events(&mut self, new_decided_round: usize) -> Vec<event::Hash> {
-        for (_peer_id, index) in self.peer_index {}
-    }
-
-    ///
-    ///
-    /// TODO: check if we need to order forks? Probably yes and indicate them when giving back.
-    fn ordered_events_for_peer(
-        &self,
-        new_decided_round: usize,
-        peer_index: &mut PeerIndexEntry,
-    ) -> Vec<event::Hash> {
-    }
-
-    /// # Description
-    ///
-    /// Data needed for ordering an event. To be more precise, it consists of
+    /// Data needed for ordering an event.
     ///
     /// # Return value
     ///
@@ -718,6 +814,11 @@ impl<TPayload> Graph<TPayload> {
         &self,
         event_hash: &event::Hash,
     ) -> Result<(usize, u64, event::Hash), OrderingDataError> {
+        // is result cached?
+        if let Some(cached) = self.ordering_data_cache.get(event_hash) {
+            return Ok(cached.clone());
+        }
+
         // check that the event is known in advance
         let event_signature = self
             .all_events
@@ -732,8 +833,6 @@ impl<TPayload> Graph<TPayload> {
         // round that satisfies the condition, we start from round of `x` forward to
         // get `r`.
         for checked_round in self.round_of(event_hash)..self.round_index.len() {
-            // TODO: Move iteration on unique famous witnesses in a separate func (+ do
-            // smth with panics)
             let unique_famous_witnesses = match self.round_unique_famous_witnesses(checked_round) {
                 Ok(list) => list,
                 // round before this did not satisfy our condition and later ones
@@ -908,6 +1007,87 @@ impl<'a, T> Iterator for SelfAncestorIter<'a, T> {
 impl<'a, T> DoubleEndedIterator for SelfAncestorIter<'a, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.node_list.pop_back()
+    }
+}
+
+pub struct SliceIterator<'a, TPayload, FStop> {
+    current_slice: HashSet<&'a Event<TPayload>>,
+    stop_iterate_peer: FStop,
+    all_events: &'a HashMap<event::Hash, Event<TPayload>>,
+}
+
+impl<'a, TPayload, FStop> SliceIterator<'a, TPayload, FStop>
+where
+    TPayload: Eq + std::hash::Hash,
+{
+    /// Create iterator over graph slice. It goes higher in ancestry (from the start to its
+    /// ancestors). Visits only events made by peers supplied in `starting_slice`. Does not
+    /// guarantee homogeneous (?) pass, i.e. might first go through only one peer and then
+    /// visit events of others.
+    ///
+    /// Stops looking into a peer when parents of all sliced events do not satisfy
+    /// `stop_condition`.
+    ///
+    /// `all_events` used for lookup of events since parents are stored in hashes (in the
+    /// events).
+    fn new(
+        starting_slice: &HashSet<&event::Hash>,
+        stop_condition: FStop,
+        all_events: &'a HashMap<event::Hash, Event<TPayload>>,
+    ) -> Result<Self, UnknownEvent>
+    where
+        TPayload: Eq + std::hash::Hash,
+    {
+        let current_slice: Result<Vec<_>, _> = starting_slice
+            .iter()
+            .map(|hash| all_events.get(hash).ok_or(UnknownEvent))
+            .collect();
+        let current_slice = HashSet::<_>::from_iter(current_slice?);
+        Ok(Self {
+            current_slice,
+            stop_iterate_peer: stop_condition,
+            all_events,
+        })
+    }
+
+    fn add_parents(&mut self, event: &Event<TPayload>) -> Result<(), UnknownEvent> {
+        if let event::Kind::Regular(parents) = event.parents() {
+            let self_parent = self
+                .all_events
+                .get(&parents.self_parent)
+                .ok_or(UnknownEvent)?;
+            self.current_slice.insert(self_parent);
+
+            // We add only parents made by the same peer not to visit events multiple times
+            let this_author = event.author();
+            let other_parent = self
+                .all_events
+                .get(&parents.other_parent)
+                .ok_or(UnknownEvent)?;
+            if other_parent.author() == this_author {
+                self.current_slice.insert(other_parent);
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<'a, TPayload, FStop> Iterator for SliceIterator<'a, TPayload, FStop>
+where
+    FStop: Fn(&Event<TPayload>) -> bool,
+    TPayload: Eq + std::hash::Hash,
+{
+    type Item = &'a Event<TPayload>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next_event = self.current_slice.iter().next().cloned()?;
+        if (self.stop_iterate_peer)(next_event) {
+            None
+        } else {
+            self.add_parents(next_event)
+                .expect("parents must be tracked");
+            Some(next_event)
+        }
     }
 }
 
