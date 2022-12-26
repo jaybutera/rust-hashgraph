@@ -1672,8 +1672,46 @@ fn test_ordering_decided() {
             (
                 setup => build_graph_detailed_example(0, 999).unwrap(),
                 test_case => (
-                    expect: Ok((2, 1, peers.get("a").unwrap().events[1].clone())),
+                    expect: Ok((1, 123, peers.get("a").unwrap().events[0].clone())),
+                    arguments: vec![&peers.get("a").unwrap().events[0]],
+                ),
+                test_case => (
+                    expect: Ok((1, 123, peers.get("a").unwrap().events[1].clone())),
                     arguments: vec![&peers.get("a").unwrap().events[1]],
+                ),
+                test_case => (
+                    expect: Ok((1, 123, peers.get("b").unwrap().events[0].clone())),
+                    arguments: vec![&peers.get("b").unwrap().events[0]],
+                ),
+                test_case => (
+                    expect: Ok((1, 123, peers.get("b").unwrap().events[1].clone())),
+                    arguments: vec![&peers.get("b").unwrap().events[1]],
+                ),
+                test_case => (
+                    expect: Ok((1, 123, peers.get("b").unwrap().events[2].clone())),
+                    arguments: vec![&peers.get("b").unwrap().events[2]],
+                ),
+                test_case => (
+                    expect: Ok((1, 123, peers.get("c").unwrap().events[0].clone())),
+                    arguments: vec![&peers.get("c").unwrap().events[0]],
+                ),
+                test_case => (
+                    expect: Ok((1, 123, peers.get("d").unwrap().events[0].clone())),
+                    arguments: vec![&peers.get("d").unwrap().events[0]],
+                ),
+                test_case => (
+                    expect: Ok((1, 123, peers.get("d").unwrap().events[1].clone())),
+                    arguments: vec![&peers.get("d").unwrap().events[1]],
+                ),
+                test_case => (
+                    expect: Ok((1, 123, peers.get("d").unwrap().events[2].clone())),
+                    arguments: vec![&peers.get("d").unwrap().events[2]],
+                ),
+                // For some reason they do not consider this event in "detailed examples"
+                // however it seems to fit the needed properties.
+                test_case => (
+                    expect: Ok((1, 123, peers.get("d").unwrap().events[3].clone())),
+                    arguments: vec![&peers.get("d").unwrap().events[3]],
                 ),
                 test_case => (
                     expect: Err(OrderingDataError::Undecided),
@@ -1681,7 +1719,7 @@ fn test_ordering_decided() {
                         &peers.get("a").unwrap().events[2..],
                         &peers.get("b").unwrap().events[3..],
                         &peers.get("c").unwrap().events[1..],
-                        &peers.get("d").unwrap().events[4..],
+                        &peers.get("d").unwrap().events[5..],
                     ].iter()
                         .flat_map(|s| s.iter().collect::<Vec<&_>>())
                         .collect(),
