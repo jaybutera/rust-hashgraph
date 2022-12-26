@@ -855,7 +855,7 @@ impl<TPayload> Graph<TPayload> {
                 // a self-ancestor of a round r unique famous
                 // witness, and x is an ancestor of z but not
                 // of the self-parent of z
-                let s = unique_famous_witnesses.iter().filter_map(|ufw| {
+                let s = unique_famous_witnesses.iter().map(|ufw| {
                     let mut self_ancestors = self
                         .self_ancestor_iter(ufw)
                         .expect("all self ancestors of unique famous witness must be known");
@@ -865,20 +865,18 @@ impl<TPayload> Graph<TPayload> {
                         .expect("at least 1 self-ancestor must be present - the event itself");
                     for next_ufw_ancestor in self_ancestors {
                         if !self.is_ancestor(next_ufw_ancestor.hash(), event_hash) {
-                            return Some(first_descendant_event_candidate);
+                            break;
                         }
                         first_descendant_event_candidate = next_ufw_ancestor
                     }
-                    // all self-ancestors of `ufw` (unique famous witness) are descendants of `x`
-                    // so it should mean that x is genesis and the ufw is self-descendant.
-
-                    // just ignore it, since it doesn't satisfy our condition
-                    None
+                    first_descendant_event_candidate
                 });
                 let mut timestamps: Vec<_> = s.map(|event| event.timestamp()).collect();
                 timestamps.sort();
-                let consensus_timestamp = timestamps[timestamps.len() / 2];
-                return Ok((checked_round, *consensus_timestamp, event_signature.clone()));
+                let consensus_timestamp = **timestamps
+                    .get(timestamps.len() / 2)
+                    .expect("there must be some unique famous witnesses in a round");
+                return Ok((checked_round, consensus_timestamp, event_signature.clone()));
             }
         }
         Err(OrderingDataError::Undecided)
@@ -1085,6 +1083,7 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         let next_event = self.current_slice.iter().next().cloned()?;
+        self.current_slice.remove(next_event);
         if (self.stop_iterate_peer)(next_event) {
             None
         } else {
