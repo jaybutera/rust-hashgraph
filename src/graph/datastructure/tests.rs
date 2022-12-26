@@ -1660,3 +1660,33 @@ fn test_is_round_decided() {
         ]
     );
 }
+
+#[test]
+fn test_ordering_decided() {
+    run_tests!(
+        tested_function_name => "ordering_data decided",
+        tested_function => |g, event| g.ordering_data(*event),
+        name_lookup => |names, event| names.get(event).unwrap().to_owned(),
+        peers_literal => peers,
+        tests => [
+            (
+                setup => build_graph_detailed_example(0, 999).unwrap(),
+                test_case => (
+                    expect: Ok((2, 1, peers.get("a").unwrap().events[1].clone())),
+                    arguments: vec![&peers.get("a").unwrap().events[1]],
+                ),
+                test_case => (
+                    expect: Err(OrderingDataError::Undecided),
+                    arguments: [
+                        &peers.get("a").unwrap().events[2..],
+                        &peers.get("b").unwrap().events[3..],
+                        &peers.get("c").unwrap().events[1..],
+                        &peers.get("d").unwrap().events[4..],
+                    ].iter()
+                        .flat_map(|s| s.iter().collect::<Vec<&_>>())
+                        .collect(),
+                ),
+            ),
+        ]
+    );
+}
