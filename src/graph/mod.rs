@@ -14,7 +14,7 @@ type RoundNum = usize;
 
 use crate::PeerId;
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum PushKind {
     Genesis,
     Regular(event::Parents),

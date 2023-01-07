@@ -66,6 +66,8 @@ pub struct Event<TPayload> {
     user_payload: TPayload,
     parents: Kind,
     author: PeerId,
+    // TODO: create timestamps
+    // time_created_claim:
 }
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]

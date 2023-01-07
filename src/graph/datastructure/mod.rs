@@ -1,6 +1,7 @@
 use itertools::izip;
 use serde::Serialize;
 use thiserror::Error;
+use tracing::{debug, info, instrument, trace, warn};
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -125,11 +126,11 @@ pub struct Graph<TPayload> {
     coin_frequency: usize,
 }
 
-impl<T> Graph<T>
+impl<TPayload> Graph<TPayload>
 where
-    T: Serialize + Eq + std::hash::Hash,
+    TPayload: Serialize + Eq + std::hash::Hash,
 {
-    pub fn new(self_id: PeerId, genesis_payload: T, coin_frequency: usize) -> Self {
+    pub fn new(self_id: PeerId, genesis_payload: TPayload, coin_frequency: usize) -> Self {
         let mut graph = Self {
             all_events: HashMap::new(),
             peer_index: HashMap::new(),
@@ -148,14 +149,10 @@ where
             .expect("Genesis events should be valid");
         graph
     }
-}
 
-impl<TPayload> Graph<TPayload>
-where
-    TPayload: Serialize + Eq + std::hash::Hash,
-{
     /// Create and push node to the graph, adding it at the end of `author`'s lane
     /// (i.e. the node becomes the latest event of the peer).
+    #[instrument(level = "error", skip(self, payload))]
     pub fn push_node(
         &mut self,
         payload: TPayload,
@@ -163,7 +160,9 @@ where
         author: PeerId,
     ) -> Result<event::Hash, PushError> {
         // Verification first, no changing state
+        debug!("Validating the event");
 
+        trace!("Creating an event");
         let new_node = match node_type {
             PushKind::Genesis => Event::new(payload, event::Kind::Genesis, author)?,
             PushKind::Regular(Parents {
@@ -179,19 +178,25 @@ where
             )?,
         };
 
+        trace!("Testing if event is already known");
         if self.all_events.contains_key(new_node.hash()) {
             return Err(PushError::NodeAlreadyExists(new_node.hash().clone()));
         }
 
+        trace!("Performing checks or updates specific to genesis or regular events");
         match new_node.parents() {
             event::Kind::Genesis => {
+                trace!("It is a genesis event");
                 if self.peer_index.contains_key(&author) {
                     return Err(PushError::GenesisAlreadyExists);
                 }
+                debug!("The event is valid, updating state to include it");
                 let new_peer_index = PeerIndexEntry::new(new_node.hash().clone());
                 self.peer_index.insert(author, new_peer_index);
             }
             event::Kind::Regular(parents) => {
+                trace!("It is a regular event");
+                trace!("Checking presence of parents");
                 if !self.all_events.contains_key(&parents.self_parent) {
                     return Err(PushError::NoParent(parents.self_parent.clone()));
                 }
@@ -205,7 +210,14 @@ where
                     .get_mut(&parents.self_parent) // TODO: use get_many_mut when stabilized
                     .expect("Just checked self parent presence");
 
+                // self parent must have the same author by definition
+                trace!("Author validation with self parent");
                 if self_parent_node.author() != &author {
+                    debug!(
+                        "Specified self parent author ({}) differs from provided one ({})",
+                        self_parent_node.author(),
+                        author
+                    );
                     return Err(PushError::IncorrectAuthor(
                         self_parent_node.author().clone(),
                         author,
@@ -219,8 +231,10 @@ where
                     .ok_or(PushError::PeerNotFound(author))?;
 
                 // Insertion, should be valid at this point so that we don't leave in inconsistent state on error.
+                debug!("The event is valid, updating state to include it");
+                // TODO: move validation in a diff function
 
-                // update pointers of parents
+                trace!("Updating pointers of parents");
                 if let Some(sibling) = self_parent_node.children.self_child.get(0) {
                     // Track the fork. Add is idempotent, so it's ok to add the sibling.
                     author_index.add_fork(self_parent_node.hash().clone(), sibling.clone());
@@ -239,20 +253,22 @@ where
                     .other_children
                     .push(new_node.hash().clone());
                 if let Some(_) = author_index.add_latest(new_node.hash().clone()) {
-                    // TODO: warn, inconsistent state between `all_events` and `author_index`
-                    panic!()
+                    warn!("Inconsistent state: `author_index` contains events that are not tracked by `all_events`");
                 }
             }
         };
 
         // Index the node and save
+        trace!("Tracking the node");
         let hash = new_node.hash().clone();
-        self.all_events.insert(new_node.hash().clone(), new_node);
+        self.all_events.insert(hash.clone(), new_node);
 
         // Set round
-
+        trace!("Calculating round");
         let last_idx = self.round_index.len() - 1;
-        let r = self.determine_round(&hash);
+        let r = self
+            .determine_round(&hash)
+            .expect("The event was just added to tracking");
         // Cache result
         self.round_of.insert(hash.clone(), r);
         if r > last_idx {
@@ -266,6 +282,7 @@ where
         }
 
         // Set witness status
+        trace!("Checking if the event is witness");
         if self
             .determine_witness(&hash)
             .expect("Just inserted to `all_events`")
@@ -274,6 +291,7 @@ where
                 .insert(hash.clone(), WitnessFamousness::Undecided);
 
             // Update fame of previous rounds, if changed
+            trace!("Updating fame");
             self.decide_rounds();
         }
         Ok(hash)
@@ -504,30 +522,36 @@ impl<TPayload> Graph<TPayload> {
 
     /// Determine the round an event belongs to, which is the max of its parents' rounds +1 if it
     /// is a witness.
-    fn determine_round(&self, event_hash: &event::Hash) -> RoundNum {
-        let event = self.all_events.get(event_hash).unwrap();
+    fn determine_round(&self, event_hash: &event::Hash) -> Result<RoundNum, UnknownEvent> {
+        let event = self.all_events.get(event_hash).ok_or(UnknownEvent)?;
         match event.parents() {
-            event::Kind::Genesis => 0,
+            event::Kind::Genesis => Ok(0),
             event::Kind::Regular(Parents {
                 self_parent,
                 other_parent,
             }) => {
                 // Check if it is cached
                 if let Some(r) = self.round_of.get(event_hash) {
-                    return *r;
+                    return Ok(*r);
                 }
                 let r = std::cmp::max(
-                    self.determine_round(self_parent),
-                    self.determine_round(other_parent),
+                    self.determine_round(self_parent)
+                        .expect("Parents of known events must be known"),
+                    self.determine_round(other_parent)
+                        .expect("Parents of known events must be known"),
                 );
 
                 // Get witnesses from round r
                 let round_witnesses = self
                     .round_witnesses(r)
-                    .unwrap()
+                    .expect("Round of known events must be known")
                     .into_iter()
                     .filter(|eh| *eh != event_hash)
-                    .map(|e_hash| self.all_events.get(e_hash).unwrap())
+                    .map(|e_hash| {
+                        self.all_events
+                            .get(e_hash)
+                            .expect("Witnesses must be known")
+                    })
                     .collect::<Vec<_>>();
 
                 // Find out how many witnesses by unique members the event can strongly see
@@ -545,11 +569,12 @@ impl<TPayload> Graph<TPayload> {
                 // n is number of members in hashgraph
                 let n = self.members_count();
 
-                if round_witnesses_strongly_seen.len() > (2 * n / 3) {
+                let event_round = if round_witnesses_strongly_seen.len() > (2 * n / 3) {
                     r + 1
                 } else {
                     r
-                }
+                };
+                Ok(event_round)
             }
         }
     }
