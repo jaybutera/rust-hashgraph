@@ -291,8 +291,8 @@ where
                 .insert(hash.clone(), WitnessFamousness::Undecided);
 
             // Update fame of previous rounds, if changed
-            trace!("Updating fame");
-            self.decide_rounds();
+            trace!("Updating fame and adding events to ordering");
+            self.handle_ordering();
         }
         Ok(hash)
     }
@@ -310,59 +310,55 @@ impl<TPayload> Graph<TPayload>
 where
     TPayload: Eq + std::hash::Hash,
 {
-    /// Checks if some new rounds were decided and acknowledges this
-    /// by updating `last_known_decided_round`
+    
     #[instrument(level = "debug", skip_all)]
-    fn decide_rounds(&mut self) {
-        let mut next_round_to_decide = self.last_known_decided_round.map(|a| a + 1).unwrap_or(0);
-        // TODO: currently `add_new_ordered_events` (`ordered_events` in particuler)
-        // depends on round being checked as decided. I do not think the other case
-        // is considered. Thus it seems that it's better to later change it so that
-        // this dependency is represented in the code (for example, by having a
-        // method "try_to_decide_round_and_order_events_ordered_by_it" (with better
-        // name of) that checks if it's decided, only then does needed operations
-        // while keeping a good state. Also it reports the result (including if the
-        // round is undecided) and this loop stops on it.
-        //
-        // Should do it when there are enough tests to check if changes will be correct
-        // and in a separate commit
-        while self.is_round_decided(next_round_to_decide) {
-            debug!("Round {} decided", next_round_to_decide);
-            self.last_known_decided_round = Some(next_round_to_decide);
-            next_round_to_decide += 1;
+    /// Process stuff related to event ordering.
+    /// 
+    /// In particular, checks if new events can be ordered and orders them.
+    fn handle_ordering(&mut self) {
+        if self.advance_rounds_decided() {
+            let last_known_decided_round = match self.last_known_decided_round {
+                Some(v) => v,
+                None => return,
+            };
+            // We insert only events ordered by rounds with their fame decided.
+            let new_rounds_that_order = self.ordering.next_round_to_order()..last_known_decided_round;
+            debug!(
+                "Sorting events ordered by rounds in range [{}, {})",
+                new_rounds_that_order.start, new_rounds_that_order.end
+            );
+            for decided_round in new_rounds_that_order {
+                match self.add_new_ordered_events(decided_round) {
+                    Ok(()) => (),
+                    Err(OrderedEventsError::UndecidedRound) => break,
+                    Err(OrderedEventsError::UnknownRound) => panic!("Round marked as `last_known_decided_round` must be known"),
+                }
+            }
         }
-        self.add_new_ordered_events();
     }
 
-    /// true if all known witnesses had their fame decided, for both
-    /// round r and all earlier rounds (from the paper)
+    /// Round is decided if all known witnesses had their fame decided, for both
+    /// round r and all earlier rounds (from the paper). Therefore it makes
+    /// sense to check rounds for it one by one.
+    /// 
+    /// This method checks if any new rounds satisfy this property and updates
+    /// counter for event ordering.
+    /// 
+    /// Returns true if some advancements were made
     #[instrument(level = "debug", skip(self))]
-    fn is_round_decided(&self, r: usize) -> bool {
-        // TODO: check that the rounds can't become undecided for some reason
-        // (shouldn't happen, right??). I assume this when saving that
-
-        // Usually the last round should fail first, however not sure if it's
-        // cheaper to compute from the end.
-        for checked_round in (0..=r).rev() {
+    fn advance_rounds_decided(&mut self) -> bool {
+        let mut progress_made = false;
+        let next_round_to_decide = self.last_known_decided_round.map(|a| a + 1).unwrap_or(0);
+        debug!("Starting from round {}. It is a next round after ones known to be decided", next_round_to_decide);
+        for checked_round in next_round_to_decide..self.round_index.len() {
             trace!("Checking round {}", checked_round);
-            if self.is_round_decided_before(checked_round) {
-                trace!("Round {} was checked before", checked_round);
-                continue;
-            }
-            let round_witnesses = if let Some(i) = self.round_witnesses(checked_round) {
-                i
-            } else {
-                debug!(
-                    "Round {} is unknown, so {} is not decided",
-                    checked_round, r
-                );
-                return false;
-            };
+            let round_witnesses = self.round_witnesses(checked_round)
+                .expect("Round number is bounded by `round_index` size");
             for event_hash in round_witnesses {
                 match self.is_famous_witness(event_hash) {
                     Ok(WitnessFamousness::Undecided) => {
-                        debug!("Event {} is undecided, so round {} as well", event_hash, r);
-                        return false;
+                        debug!("Event {} is not decided, so {} is the latest one to be decided", event_hash, checked_round-1);
+                        return progress_made;
                     }
                     Ok(_) => {
                         continue;
@@ -377,17 +373,13 @@ where
                     }
                 }
             }
-            trace!("Round {} is decided", checked_round);
-            // At this point we know that round `checked_round` is decided
-            // we should be safe to save this not to recompute it later
-            // TODO: fix to actually update value (will be fixed by TODO
-            // in `decide_rounds`)
-            self.last_known_decided_round
-                .map_or(checked_round, |d| d.max(checked_round));
+            debug!("Round {} is decided", checked_round);
+            // At this point we know that round `checked_round` is decided.
+            // So we update the stored value.
+            self.last_known_decided_round = Some(self.last_known_decided_round.map_or(checked_round, |d| d.max(checked_round)));
+            progress_made = true;
         }
-        trace!("Round {} and all before are decided", r);
-        // This and all previous rounds are decided
-        true
+        progress_made
     }
 
     /// # Description
@@ -408,59 +400,45 @@ where
     ///
     /// In other words, an event is finalized  when ufws of some round all see it. It implies
     /// (at least it seems so) that we can univocally find its place in order of all events.
-    #[instrument(level = "debug", skip_all)]
-    fn add_new_ordered_events(&mut self) {
-        let last_known_decided_round = match self.last_known_decided_round {
-            Some(v) => v,
-            None => return,
-        };
-        // We insert only events ordered by rounds with their fame decided.
-        let new_rounds_that_order = self.ordering.next_round_to_order()..last_known_decided_round;
-        debug!(
-            "Sorting events ordered by rounds in range [{}, {})",
-            new_rounds_that_order.start, new_rounds_that_order.end
-        );
-        for decided_round in new_rounds_that_order {
-            trace!("Handling events sorted at round {}", decided_round);
-            match self.ordered_events(decided_round) {
-                Ok(events) => {
-                    let ufw = self.round_unique_famous_witnesses(decided_round).expect(
-                        "round that orders events was already checked if its fame was decided",
-                    );
-                    let unique_famous_witness_sigs = ufw
-                        .into_iter()
-                        .map(|e| {
-                            self.all_events
-                                .get(e)
-                                .expect("witnesses must be tracked")
-                                .signature()
-                                .clone()
-                        })
-                        .collect();
-                    self.ordering
-                        .add_received_round(
-                            decided_round,
-                            events.into_iter(),
-                            unique_famous_witness_sigs,
-                        )
-                        .expect("just got round # from ordering, must be correct");
-                }
-                Err(OrderedEventsError::UndecidedRound) => {
-                    warn!(
+    fn add_new_ordered_events(&mut self, decided_round: usize) -> Result<(), OrderedEventsError> {
+        trace!("Handling events sorted by round {}", decided_round);
+        match self.ordered_events(decided_round) {
+            Ok(events) => {
+                let ufw = self.round_unique_famous_witnesses(decided_round).expect(
+                    "round that orders events was already checked if its fame was decided",
+                );
+                let unique_famous_witness_sigs = ufw
+                    .into_iter()
+                    .map(|e| {
+                        self.all_events
+                            .get(e)
+                            .expect("witnesses must be tracked")
+                            .signature()
+                            .clone()
+                    })
+                    .collect();
+                self.ordering
+                    .add_received_round(
+                        decided_round,
+                        events.into_iter(),
+                        unique_famous_witness_sigs,
+                    )
+                    .expect("just got round # from ordering, must be correct");
+                Ok(())
+            }
+            Err(e) => {
+                match e {
+                    OrderedEventsError::UnknownRound => warn!(
                         "No events ordered by round {} were found for some reason",
                         decided_round
-                    );
-                    break;
-                }
-                Err(OrderedEventsError::UnknownRound) => {
-                    // TODO: debug log (no more ordered events found)
-                    error!("Round {} is handled, but it is unknown!", decided_round);
-                    panic!("Round marked as `last_known_decided_round` must be known");
-                }
+                    ),
+                    OrderedEventsError::UndecidedRound => {
+                        error!("Round {} is handled, but it is unknown!", decided_round);
+                    },
+                };
+                Err(e)
             }
         }
-        // self.ordering
-        //     .add_received_round(new_decided_round, events, unique_famous_witness_sigs)
     }
 
     /// Get events to be ordered by `round` (in no particular order yet).
@@ -899,11 +877,6 @@ impl<TPayload> Graph<TPayload> {
 
         // TODO: cache?
         Ok(WitnessUniqueFamousness::from_famousness(fame, unique))
-    }
-
-    fn is_round_decided_before(&self, r: usize) -> bool {
-        self.last_known_decided_round
-            .map_or(false, |decided| decided >= r)
     }
 
     /// # Description

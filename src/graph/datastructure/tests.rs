@@ -1617,44 +1617,36 @@ fn test_is_unique_famous_witness() {
 fn test_is_round_decided() {
     run_tests!(
         tested_function_name => "is_round_decided",
-        tested_function => |g, r| g.is_round_decided(*r),
-        name_lookup => |_names, r| r.to_string(),
+        tested_function => |g, _| g.last_known_decided_round,
+        name_lookup => |_names, _| "".to_string(),
         peers_literal => _peers,
         tests => [
             (
                 setup => build_graph_some_chain(0, 999).unwrap(),
                 test_case => (
-                    expect: false,
-                    arguments: vec![0, 1],
+                    expect: None,
+                    arguments: vec![()],
                 ),
             ),
             (
                 setup => build_graph_from_paper(0, 999).unwrap(),
                 test_case => (
-                    expect: false,
-                    arguments: vec![0, 1],
+                    expect: None,
+                    arguments: vec![()],
                 ),
             ),
             (
                 setup => build_graph_detailed_example(0, 999).unwrap(),
                 test_case => (
-                    expect: true,
-                    arguments: vec![0, 1],
-                ),
-                test_case => (
-                    expect: false,
-                    arguments: vec![2, 3],
+                    expect: Some(1),
+                    arguments: vec![()],
                 ),
             ),
             (
                 setup => build_graph_fork([42, 1337, 80085].into_iter().cycle(), 999).unwrap(),
                 test_case => (
-                    expect: true,
-                    arguments: vec![0, 1],
-                ),
-                test_case => (
-                    expect: false,
-                    arguments: vec![2, 3],
+                    expect: Some(1),
+                    arguments: vec![()],
                 ),
             ),
         ]
