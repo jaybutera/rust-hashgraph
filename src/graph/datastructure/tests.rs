@@ -384,7 +384,7 @@ where
             self_parent: self_parent_event_hash.clone(),
             other_parent: other_parent_event_hash.clone(),
         };
-        let new_event_hash = graph.push_node(
+        let new_event_hash = graph.push_event(
             payload.next().expect("Iterator finished"),
             PushKind::Regular(parents),
             *author_id,
@@ -421,7 +421,7 @@ where
                 .expect("Mush have own genesis")
                 .clone()
         } else {
-            graph.push_node(payload, PushKind::Genesis, *id)?
+            graph.push_event(payload, PushKind::Genesis, *id)?
         };
         names.insert(hash, name.to_owned());
     }
@@ -669,8 +669,8 @@ fn duplicate_push_fails() {
     } = build_graph_from_paper((), 999).unwrap();
     let a_id = peers.get("a").unwrap().id;
     assert!(matches!(
-        graph.push_node((), PushKind::Genesis, a_id),
-        Err(PushError::NodeAlreadyExists(hash)) if &hash == graph.peer_genesis(&a_id).unwrap()
+        graph.push_event((), PushKind::Genesis, a_id),
+        Err(PushError::EventAlreadyExists(hash)) if &hash == graph.peer_genesis(&a_id).unwrap()
     ));
 }
 
@@ -683,7 +683,7 @@ fn double_genesis_fails() {
         setup_name: _,
     } = build_graph_from_paper(0, 999).unwrap();
     assert!(matches!(
-        graph.push_node(1, PushKind::Genesis, peers.get("a").unwrap().id),
+        graph.push_event(1, PushKind::Genesis, peers.get("a").unwrap().id),
         Err(PushError::GenesisAlreadyExists)
     ))
 }
@@ -696,25 +696,25 @@ fn missing_parent_fails() {
         names: _,
         setup_name: _,
     } = build_graph_from_paper((), 999).unwrap();
-    let fake_node = Event::new((), event::Kind::Genesis, 1232423).unwrap();
-    let legit_node_hash = graph.peer_latest_event(&0).unwrap().clone();
+    let fake_event = Event::new((), event::Kind::Genesis, 1232423).unwrap();
+    let legit_event_hash = graph.peer_latest_event(&0).unwrap().clone();
 
     let fake_parents_1 = Parents {
-        self_parent: fake_node.hash().clone(),
-        other_parent: legit_node_hash.clone(),
+        self_parent: fake_event.hash().clone(),
+        other_parent: legit_event_hash.clone(),
     };
     assert!(matches!(
-        graph.push_node((), PushKind::Regular(fake_parents_1), peers.get("a").unwrap().id),
-        Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_node.hash()
+        graph.push_event((), PushKind::Regular(fake_parents_1), peers.get("a").unwrap().id),
+        Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_event.hash()
     ));
 
     let fake_parents_2 = Parents {
-        self_parent: legit_node_hash.clone(),
-        other_parent: fake_node.hash().clone(),
+        self_parent: legit_event_hash.clone(),
+        other_parent: fake_event.hash().clone(),
     };
     assert!(matches!(
-        graph.push_node((), PushKind::Regular(fake_parents_2), peers.get("a").unwrap().id),
-        Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_node.hash()
+        graph.push_event((), PushKind::Regular(fake_parents_2), peers.get("a").unwrap().id),
+        Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_event.hash()
     ));
 }
 

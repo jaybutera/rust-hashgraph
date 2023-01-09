@@ -26,8 +26,8 @@ pub enum PushError {
     GenesisAlreadyExists,
     #[error("Could not find specified parent in the graph. Parent hash: `{0}`")]
     NoParent(event::Hash),
-    #[error("Pushed node is already present in the graph. Hash: `{0}`. Can be triggered if hashes collide for actually different nodes (although extremely unlikely for 512 bit hash)")]
-    NodeAlreadyExists(event::Hash),
+    #[error("Pushed event is already present in the graph. Hash: `{0}`. Can be triggered if hashes collide for actually different events (although extremely unlikely for 512 bit hash)")]
+    EventAlreadyExists(event::Hash),
     #[error("Given peer in not known ")]
     PeerNotFound(PeerId),
     /// `(expected, provided)`

@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use self::ordering::OrderedEvents;
 
 use super::event::{self, Event, Parents};
-use super::index::{NodeIndex, PeerIndexEntry};
+use super::index::{EventIndex, PeerIndexEntry};
 use super::{PushError, PushKind, RoundNum};
 use crate::PeerId;
 
@@ -104,7 +104,7 @@ pub enum OrderedEventsError {
 }
 
 pub struct Graph<TPayload> {
-    all_events: NodeIndex<Event<TPayload>>,
+    all_events: EventIndex<Event<TPayload>>,
     peer_index: HashMap<PeerId, PeerIndexEntry>,
     /// Consistent and reliable index (should be)
     round_index: Vec<HashSet<event::Hash>>,
@@ -145,25 +145,25 @@ where
         };
 
         graph
-            .push_node(genesis_payload, PushKind::Genesis, self_id)
+            .push_event(genesis_payload, PushKind::Genesis, self_id)
             .expect("Genesis events should be valid");
         graph
     }
 
-    /// Create and push node to the graph, adding it at the end of `author`'s lane
-    /// (i.e. the node becomes the latest event of the peer).
+    /// Create and push event to the graph, adding it at the end of `author`'s lane
+    /// (i.e. the event becomes the latest one of the peer).
     #[instrument(level = "error", skip(self, payload))]
-    pub fn push_node(
+    pub fn push_event(
         &mut self,
         payload: TPayload,
-        node_type: PushKind,
+        event_type: PushKind,
         author: PeerId,
     ) -> Result<event::Hash, PushError> {
         // Verification first, no changing state
         debug!("Validating the event");
 
         trace!("Creating an event");
-        let new_node = match node_type {
+        let new_event = match event_type {
             PushKind::Genesis => Event::new(payload, event::Kind::Genesis, author)?,
             PushKind::Regular(Parents {
                 self_parent,
@@ -179,19 +179,19 @@ where
         };
 
         trace!("Testing if event is already known");
-        if self.all_events.contains_key(new_node.hash()) {
-            return Err(PushError::NodeAlreadyExists(new_node.hash().clone()));
+        if self.all_events.contains_key(new_event.hash()) {
+            return Err(PushError::EventAlreadyExists(new_event.hash().clone()));
         }
 
         trace!("Performing checks or updates specific to genesis or regular events");
-        match new_node.parents() {
+        match new_event.parents() {
             event::Kind::Genesis => {
                 trace!("It is a genesis event");
                 if self.peer_index.contains_key(&author) {
                     return Err(PushError::GenesisAlreadyExists);
                 }
                 debug!("The event is valid, updating state to include it");
-                let new_peer_index = PeerIndexEntry::new(new_node.hash().clone());
+                let new_peer_index = PeerIndexEntry::new(new_event.hash().clone());
                 self.peer_index.insert(author, new_peer_index);
             }
             event::Kind::Regular(parents) => {
@@ -205,21 +205,21 @@ where
                 }
 
                 // taking mutable for update later
-                let self_parent_node = self
+                let self_parent_event = self
                     .all_events
                     .get_mut(&parents.self_parent) // TODO: use get_many_mut when stabilized
                     .expect("Just checked self parent presence");
 
                 // self parent must have the same author by definition
                 trace!("Author validation with self parent");
-                if self_parent_node.author() != &author {
+                if self_parent_event.author() != &author {
                     debug!(
                         "Specified self parent author ({}) differs from provided one ({})",
-                        self_parent_node.author(),
+                        self_parent_event.author(),
                         author
                     );
                     return Err(PushError::IncorrectAuthor(
-                        self_parent_node.author().clone(),
+                        self_parent_event.author().clone(),
                         author,
                     ));
                 }
@@ -235,33 +235,33 @@ where
                 // TODO: move validation in a diff function
 
                 trace!("Updating pointers of parents");
-                if let Some(sibling) = self_parent_node.children.self_child.get(0) {
+                if let Some(sibling) = self_parent_event.children.self_child.get(0) {
                     // Track the fork. Add is idempotent, so it's ok to add the sibling.
-                    author_index.add_fork(self_parent_node.hash().clone(), sibling.clone());
-                    author_index.add_fork(self_parent_node.hash().clone(), new_node.hash().clone());
+                    author_index.add_fork(self_parent_event.hash().clone(), sibling.clone());
+                    author_index.add_fork(self_parent_event.hash().clone(), new_event.hash().clone());
                 }
-                self_parent_node
+                self_parent_event
                     .children
                     .self_child
-                    .push(new_node.hash().clone());
-                let other_parent_node = self
+                    .push(new_event.hash().clone());
+                let other_parent_event = self
                     .all_events
                     .get_mut(&parents.other_parent)
                     .expect("Just checked other parent presence");
-                other_parent_node
+                other_parent_event
                     .children
                     .other_children
-                    .push(new_node.hash().clone());
-                if let Some(_) = author_index.add_latest(new_node.hash().clone()) {
+                    .push(new_event.hash().clone());
+                if let Some(_) = author_index.add_latest(new_event.hash().clone()) {
                     warn!("Inconsistent state: `author_index` contains events that are not tracked by `all_events`");
                 }
             }
         };
 
-        // Index the node and save
-        trace!("Tracking the node");
-        let hash = new_node.hash().clone();
-        self.all_events.insert(hash.clone(), new_node);
+        // Index the event and save
+        trace!("Tracking the event");
+        let hash = new_event.hash().clone();
+        self.all_events.insert(hash.clone(), new_event);
 
         // Set round
         trace!("Calculating round");
@@ -270,14 +270,17 @@ where
             .determine_round(&hash)
             .expect("The event was just added to tracking");
         // Cache result
+        trace!("Caching the result");
         self.round_of.insert(hash.clone(), r);
         if r > last_idx {
             // Create a new round
+            trace!("Creating new round in index");
             let mut round_hs = HashSet::new();
             round_hs.insert(hash.clone());
             self.round_index.push(round_hs);
         } else {
             // Otherwise push onto appropriate round
+            trace!("Inserting event into existing round index");
             self.round_index[r].insert(hash.clone());
         }
 
@@ -287,6 +290,7 @@ where
             .determine_witness(&hash)
             .expect("Just inserted to `all_events`")
         {
+            trace!("Adding event to witness index");
             self.witnesses
                 .insert(hash.clone(), WitnessFamousness::Undecided);
 
@@ -294,10 +298,13 @@ where
             trace!("Updating fame and adding events to ordering");
             self.handle_ordering();
         }
+        else {
+            trace!("Event is not a witness");
+        }
         Ok(hash)
     }
 
-    pub fn next_node(&mut self) -> Option<&Event<TPayload>> {
+    pub fn next_event(&mut self) -> Option<&Event<TPayload>> {
         self.ordering.next_event().map(|hash| {
             self.all_events
                 .get(hash)
@@ -579,6 +586,9 @@ impl<TPayload> Graph<TPayload> {
 
     /// Determine the round an event belongs to, which is the max of its parents' rounds +1 if it
     /// is a witness.
+    /// 
+    /// Actually calculates the number according to needed properties.
+    #[instrument(level = "debug", skip(self))]
     fn determine_round(&self, event_hash: &event::Hash) -> Result<RoundNum, UnknownEvent> {
         let event = self.all_events.get(event_hash).ok_or(UnknownEvent)?;
         match event.parents() {
@@ -587,8 +597,10 @@ impl<TPayload> Graph<TPayload> {
                 self_parent,
                 other_parent,
             }) => {
+                trace!("Finding round # of regular event");
                 // Check if it is cached
                 if let Some(r) = self.round_of.get(event_hash) {
+                    trace!("Result was cached, returning it");
                     return Ok(*r);
                 }
                 let r = std::cmp::max(
@@ -599,6 +611,7 @@ impl<TPayload> Graph<TPayload> {
                 );
 
                 // Get witnesses from round r
+                trace!("Fetching parents' round witnesses to check if it is a witness");
                 let round_witnesses = self
                     .round_witnesses(r)
                     .expect("Round of known events must be known")
@@ -612,6 +625,7 @@ impl<TPayload> Graph<TPayload> {
                     .collect::<Vec<_>>();
 
                 // Find out how many witnesses by unique members the event can strongly see
+                trace!("Find which of them are strongly seen by the event");
                 let round_witnesses_strongly_seen =
                     round_witnesses
                         .iter()
@@ -627,8 +641,10 @@ impl<TPayload> Graph<TPayload> {
                 let n = self.members_count();
 
                 let event_round = if round_witnesses_strongly_seen.len() > (2 * n / 3) {
+                    trace!("Supermajority achieved, it is a witness");
                     r + 1
                 } else {
+                    trace!("No supermajority, it is not a witness");
                     r
                 };
                 Ok(event_round)
@@ -998,7 +1014,7 @@ impl<TPayload> Graph<TPayload> {
 }
 
 pub struct AncestorIter<'a, T> {
-    node_list: Vec<&'a Event<T>>,
+    event_list: Vec<&'a Event<T>>,
     all_events: &'a HashMap<event::Hash, Event<T>>,
     visited_events: HashSet<&'a event::Hash>,
 }
@@ -1009,7 +1025,7 @@ impl<'a, T> AncestorIter<'a, T> {
         ancestors_of: &'a event::Hash,
     ) -> Self {
         let mut iter = AncestorIter {
-            node_list: vec![],
+            event_list: vec![],
             all_events: all_events,
             visited_events: HashSet::new(),
         };
@@ -1024,7 +1040,7 @@ impl<'a, T> AncestorIter<'a, T> {
         let mut event = self.all_events.get(event_hash).unwrap();
 
         loop {
-            self.node_list.push(event);
+            self.event_list.push(event);
             self.visited_events.insert(event_hash);
 
             if let event::Kind::Regular(Parents { self_parent, .. }) = event.parents() {
@@ -1044,7 +1060,7 @@ impl<'a, T> Iterator for AncestorIter<'a, T> {
     type Item = &'a Event<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let event = self.node_list.pop()?;
+        let event = self.event_list.pop()?;
 
         if let event::Kind::Regular(Parents { other_parent, .. }) = event.parents() {
             self.push_self_ancestors(other_parent);
@@ -1054,7 +1070,7 @@ impl<'a, T> Iterator for AncestorIter<'a, T> {
 }
 
 pub struct SelfAncestorIter<'a, T> {
-    node_list: VecDeque<&'a Event<T>>,
+    event_list: VecDeque<&'a Event<T>>,
 }
 
 impl<'a, T> SelfAncestorIter<'a, T> {
@@ -1062,18 +1078,18 @@ impl<'a, T> SelfAncestorIter<'a, T> {
         all_events: &'a HashMap<event::Hash, Event<T>>,
         ancestors_of: &'a event::Hash,
     ) -> Option<Self> {
-        let mut node_list = VecDeque::new();
+        let mut event_list = VecDeque::new();
         let mut next_event_hash = ancestors_of;
         loop {
             let next_event = all_events.get(next_event_hash)?;
-            node_list.push_back(next_event);
+            event_list.push_back(next_event);
             if let event::Kind::Regular(Parents { self_parent, .. }) = next_event.parents() {
                 next_event_hash = self_parent
             } else {
                 break;
             }
         }
-        Some(Self { node_list })
+        Some(Self { event_list })
     }
 }
 
@@ -1081,13 +1097,13 @@ impl<'a, T> Iterator for SelfAncestorIter<'a, T> {
     type Item = &'a Event<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.node_list.pop_front()
+        self.event_list.pop_front()
     }
 }
 
 impl<'a, T> DoubleEndedIterator for SelfAncestorIter<'a, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        self.node_list.pop_back()
+        self.event_list.pop_back()
     }
 }
 

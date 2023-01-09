@@ -2,12 +2,12 @@ use std::collections::{HashMap, HashSet};
 
 use super::event;
 
-pub type NodeIndex<TIndexPayload> = HashMap<event::Hash, TIndexPayload>;
+pub type EventIndex<TIndexPayload> = HashMap<event::Hash, TIndexPayload>;
 
 pub struct PeerIndexEntry {
     genesis: event::Hash,
     /// Use `add_latest` for insertion
-    authored_events: NodeIndex<()>,
+    authored_events: EventIndex<()>,
     /// Forks authored by the peer that we've observed. Forks are events
     /// that have the same `self_parent`.
     ///
