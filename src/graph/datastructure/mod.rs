@@ -4,7 +4,7 @@ use thiserror::Error;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::time::{UNIX_EPOCH, Instant, SystemTime};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use self::ordering::OrderedEvents;
 
@@ -146,7 +146,15 @@ where
         };
 
         graph
-            .push_event(genesis_payload, PushKind::Genesis, self_id, SystemTime::now().duration_since(UNIX_EPOCH).expect("Written without time travel in mind").as_millis())
+            .push_event(
+                genesis_payload,
+                PushKind::Genesis,
+                self_id,
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Written without time travel in mind")
+                    .as_millis(),
+            )
             .expect("Genesis events should be valid");
         graph
     }
@@ -177,7 +185,7 @@ where
                     other_parent,
                 }),
                 author,
-                time_created
+                time_created,
             )?,
         };
 
@@ -241,7 +249,8 @@ where
                 if let Some(sibling) = self_parent_event.children.self_child.get(0) {
                     // Track the fork. Add is idempotent, so it's ok to add the sibling.
                     author_index.add_fork(self_parent_event.hash().clone(), sibling.clone());
-                    author_index.add_fork(self_parent_event.hash().clone(), new_event.hash().clone());
+                    author_index
+                        .add_fork(self_parent_event.hash().clone(), new_event.hash().clone());
                 }
                 self_parent_event
                     .children
@@ -300,8 +309,7 @@ where
             // Update fame of previous rounds, if changed
             trace!("Updating fame and adding events to ordering");
             self.handle_ordering();
-        }
-        else {
+        } else {
             trace!("Event is not a witness");
         }
         Ok(hash)
@@ -320,10 +328,9 @@ impl<TPayload> Graph<TPayload>
 where
     TPayload: Eq + std::hash::Hash,
 {
-    
     #[instrument(level = "debug", skip_all)]
     /// Process stuff related to event ordering.
-    /// 
+    ///
     /// In particular, checks if new events can be ordered and orders them.
     fn handle_ordering(&mut self) {
         if self.advance_rounds_decided() {
@@ -332,7 +339,8 @@ where
                 None => return,
             };
             // We insert only events ordered by rounds with their fame decided.
-            let new_rounds_that_order = self.ordering.next_round_to_order()..last_known_decided_round;
+            let new_rounds_that_order =
+                self.ordering.next_round_to_order()..last_known_decided_round;
             debug!(
                 "Sorting events ordered by rounds in range [{}, {})",
                 new_rounds_that_order.start, new_rounds_that_order.end
@@ -341,7 +349,9 @@ where
                 match self.add_new_ordered_events(decided_round) {
                     Ok(()) => (),
                     Err(OrderedEventsError::UndecidedRound) => break,
-                    Err(OrderedEventsError::UnknownRound) => panic!("Round marked as `last_known_decided_round` must be known"),
+                    Err(OrderedEventsError::UnknownRound) => {
+                        panic!("Round marked as `last_known_decided_round` must be known")
+                    }
                 }
             }
         }
@@ -350,24 +360,32 @@ where
     /// Round is decided if all known witnesses had their fame decided, for both
     /// round r and all earlier rounds (from the paper). Therefore it makes
     /// sense to check rounds for it one by one.
-    /// 
+    ///
     /// This method checks if any new rounds satisfy this property and updates
     /// counter for event ordering.
-    /// 
+    ///
     /// Returns true if some advancements were made
     #[instrument(level = "debug", skip(self))]
     fn advance_rounds_decided(&mut self) -> bool {
         let mut progress_made = false;
         let next_round_to_decide = self.last_known_decided_round.map(|a| a + 1).unwrap_or(0);
-        debug!("Starting from round {}. It is a next round after ones known to be decided", next_round_to_decide);
+        debug!(
+            "Starting from round {}. It is a next round after ones known to be decided",
+            next_round_to_decide
+        );
         for checked_round in next_round_to_decide..self.round_index.len() {
             trace!("Checking round {}", checked_round);
-            let round_witnesses = self.round_witnesses(checked_round)
+            let round_witnesses = self
+                .round_witnesses(checked_round)
                 .expect("Round number is bounded by `round_index` size");
             for event_hash in round_witnesses {
                 match self.is_famous_witness(event_hash) {
                     Ok(WitnessFamousness::Undecided) => {
-                        debug!("Event {} is not decided, so {} is the latest one to be decided", event_hash, checked_round-1);
+                        debug!(
+                            "Event {} is not decided, so {} is the latest one to be decided",
+                            event_hash,
+                            checked_round - 1
+                        );
                         return progress_made;
                     }
                     Ok(_) => {
@@ -386,7 +404,10 @@ where
             debug!("Round {} is decided", checked_round);
             // At this point we know that round `checked_round` is decided.
             // So we update the stored value.
-            self.last_known_decided_round = Some(self.last_known_decided_round.map_or(checked_round, |d| d.max(checked_round)));
+            self.last_known_decided_round = Some(
+                self.last_known_decided_round
+                    .map_or(checked_round, |d| d.max(checked_round)),
+            );
             progress_made = true;
         }
         progress_made
@@ -414,9 +435,9 @@ where
         trace!("Handling events sorted by round {}", decided_round);
         match self.ordered_events(decided_round) {
             Ok(events) => {
-                let ufw = self.round_unique_famous_witnesses(decided_round).expect(
-                    "round that orders events was already checked if its fame was decided",
-                );
+                let ufw = self
+                    .round_unique_famous_witnesses(decided_round)
+                    .expect("round that orders events was already checked if its fame was decided");
                 let unique_famous_witness_sigs = ufw
                     .into_iter()
                     .map(|e| {
@@ -444,7 +465,7 @@ where
                     ),
                     OrderedEventsError::UndecidedRound => {
                         error!("Round {} is handled, but it is unknown!", decided_round);
-                    },
+                    }
                 };
                 Err(e)
             }
@@ -535,7 +556,7 @@ where
                 Err(OrderingDataError::UnknownEvent) => {
                     panic!("iterator must iterate on existing events")
                 }
-                Err(OrderingDataError::Undecided) => 
+                Err(OrderingDataError::Undecided) =>
                     trace!("Event does not have ordering data yet, assuming its round_received is higher than needed"),
             }
         }
@@ -589,7 +610,7 @@ impl<TPayload> Graph<TPayload> {
 
     /// Determine the round an event belongs to, which is the max of its parents' rounds +1 if it
     /// is a witness.
-    /// 
+    ///
     /// Actually calculates the number according to needed properties.
     #[instrument(level = "debug", skip(self))]
     fn determine_round(&self, event_hash: &event::Hash) -> Result<RoundNum, UnknownEvent> {
