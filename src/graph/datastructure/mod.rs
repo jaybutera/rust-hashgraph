@@ -1,10 +1,10 @@
 use itertools::izip;
 use serde::Serialize;
 use thiserror::Error;
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{debug, error, instrument, trace, warn};
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use self::ordering::OrderedEvents;
 
