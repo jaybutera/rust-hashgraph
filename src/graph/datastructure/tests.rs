@@ -273,6 +273,26 @@ fn test_cases<TPayload, TArg, TResult, F, FNameLookup>(
     }
 }
 
+fn add_events<T, TIter>(
+    graph: &mut Graph<T>,
+    events: &[(&'static str, &'static str, &'static str)],
+    author_ids: HashMap<&'static str, PeerId>,
+    payload: &mut TIter,
+) -> Result<
+    (
+        HashMap<String, PeerEvents>,
+        HashMap<event::Hash, String>, // hash -> event_name
+    ),
+    PushError,
+>
+where
+    T: Serialize + Copy + Default + Eq + Hash,
+    TIter: Iterator<Item = T>,
+{
+    let timestamps = events.iter().map(|&(name, _, _)| (name, 0)).collect();
+    add_events_with_timestamps(graph, events, author_ids, payload, timestamps)
+}
+
 /// ## Description
 /// Add multiple events in the graph (for easier test case creation and
 /// concise and more intuitive writing).
@@ -295,11 +315,12 @@ fn test_cases<TPayload, TArg, TResult, F, FNameLookup>(
 /// * name of peer for **its genesis**
 ///
 /// first match is chosen
-fn add_events<T, TIter>(
+fn add_events_with_timestamps<T, TIter>(
     graph: &mut Graph<T>,
     events: &[(&'static str, &'static str, &'static str)],
     author_ids: HashMap<&'static str, PeerId>,
     payload: &mut TIter,
+    timestamps: HashMap<&'static str, Timestamp>,
 ) -> Result<
     (
         HashMap<String, PeerEvents>,
@@ -388,6 +409,9 @@ where
             payload.next().expect("Iterator finished"),
             PushKind::Regular(parents),
             *author_id,
+            *timestamps
+                .get(event_name)
+                .expect(&format!("No timestamp for event {}", event_name)),
         )?;
         peers_events
             .get_mut(&author)
@@ -421,7 +445,8 @@ where
                 .expect("Mush have own genesis")
                 .clone()
         } else {
-            graph.push_event(payload, PushKind::Genesis, *id)?
+            // Geneses must not have timestamp 0, but why not do it for testing other components
+            graph.push_event(payload, PushKind::Genesis, *id, 0)?
         };
         names.insert(hash, name.to_owned());
     }
@@ -669,7 +694,7 @@ fn duplicate_push_fails() {
     } = build_graph_from_paper((), 999).unwrap();
     let a_id = peers.get("a").unwrap().id;
     assert!(matches!(
-        graph.push_event((), PushKind::Genesis, a_id),
+        graph.push_event((), PushKind::Genesis, a_id, 0),
         Err(PushError::EventAlreadyExists(hash)) if &hash == graph.peer_genesis(&a_id).unwrap()
     ));
 }
@@ -683,7 +708,7 @@ fn double_genesis_fails() {
         setup_name: _,
     } = build_graph_from_paper(0, 999).unwrap();
     assert!(matches!(
-        graph.push_event(1, PushKind::Genesis, peers.get("a").unwrap().id),
+        graph.push_event(1, PushKind::Genesis, peers.get("a").unwrap().id, 0),
         Err(PushError::GenesisAlreadyExists)
     ))
 }
@@ -696,7 +721,7 @@ fn missing_parent_fails() {
         names: _,
         setup_name: _,
     } = build_graph_from_paper((), 999).unwrap();
-    let fake_event = Event::new((), event::Kind::Genesis, 1232423).unwrap();
+    let fake_event = Event::new((), event::Kind::Genesis, 1232423, 123).unwrap();
     let legit_event_hash = graph.peer_latest_event(&0).unwrap().clone();
 
     let fake_parents_1 = Parents {
@@ -704,7 +729,7 @@ fn missing_parent_fails() {
         other_parent: legit_event_hash.clone(),
     };
     assert!(matches!(
-        graph.push_event((), PushKind::Regular(fake_parents_1), peers.get("a").unwrap().id),
+        graph.push_event((), PushKind::Regular(fake_parents_1), peers.get("a").unwrap().id, 0),
         Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_event.hash()
     ));
 
@@ -713,7 +738,7 @@ fn missing_parent_fails() {
         other_parent: fake_event.hash().clone(),
     };
     assert!(matches!(
-        graph.push_event((), PushKind::Regular(fake_parents_2), peers.get("a").unwrap().id),
+        graph.push_event((), PushKind::Regular(fake_parents_2), peers.get("a").unwrap().id, 0),
         Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_event.hash()
     ));
 }

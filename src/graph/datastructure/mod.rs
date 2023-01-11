@@ -4,13 +4,14 @@ use thiserror::Error;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::time::{UNIX_EPOCH, Instant, SystemTime};
 
 use self::ordering::OrderedEvents;
 
 use super::event::{self, Event, Parents};
 use super::index::{EventIndex, PeerIndexEntry};
 use super::{PushError, PushKind, RoundNum};
-use crate::PeerId;
+use crate::{PeerId, Timestamp};
 
 mod ordering;
 
@@ -145,7 +146,7 @@ where
         };
 
         graph
-            .push_event(genesis_payload, PushKind::Genesis, self_id)
+            .push_event(genesis_payload, PushKind::Genesis, self_id, SystemTime::now().duration_since(UNIX_EPOCH).expect("Written without time travel in mind").as_millis())
             .expect("Genesis events should be valid");
         graph
     }
@@ -158,13 +159,14 @@ where
         payload: TPayload,
         event_type: PushKind,
         author: PeerId,
+        time_created: Timestamp,
     ) -> Result<event::Hash, PushError> {
         // Verification first, no changing state
         debug!("Validating the event");
 
         trace!("Creating an event");
         let new_event = match event_type {
-            PushKind::Genesis => Event::new(payload, event::Kind::Genesis, author)?,
+            PushKind::Genesis => Event::new(payload, event::Kind::Genesis, author, time_created)?,
             PushKind::Regular(Parents {
                 self_parent,
                 other_parent,
@@ -175,6 +177,7 @@ where
                     other_parent,
                 }),
                 author,
+                time_created
             )?,
         };
 
@@ -968,6 +971,9 @@ impl<TPayload> Graph<TPayload> {
                 });
                 let mut timestamps: Vec<_> = s.map(|event| event.timestamp()).collect();
                 timestamps.sort();
+                // Note that we assume a supermajority of honest members and
+                // the median is taken here. Thus this median value will always be
+                // in range of honest timestamps.
                 let consensus_timestamp = **timestamps
                     .get(timestamps.len() / 2)
                     .expect("there must be some unique famous witnesses in a round");

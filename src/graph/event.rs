@@ -2,7 +2,7 @@ use blake2::{Blake2b512, Digest};
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 
-use crate::PeerId;
+use crate::{PeerId, Timestamp};
 
 // smth like H256 ??? (some hash type)
 #[derive(Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug)]
@@ -67,7 +67,7 @@ pub struct Event<TPayload> {
     parents: Kind,
     author: PeerId,
     // TODO: create timestamps
-    // time_created_claim:
+    time_created: Timestamp,
 }
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
@@ -89,7 +89,12 @@ pub enum Kind {
 }
 
 impl<TPayload: Serialize> Event<TPayload> {
-    pub fn new(payload: TPayload, event_kind: Kind, author: PeerId) -> bincode::Result<Self> {
+    pub fn new(
+        payload: TPayload,
+        event_kind: Kind,
+        author: PeerId,
+        time_created: Timestamp,
+    ) -> bincode::Result<Self> {
         let hash = Self::calculate_hash(&payload, &event_kind, &author)?;
         Ok(Event {
             children: Children {
@@ -100,6 +105,7 @@ impl<TPayload: Serialize> Event<TPayload> {
             user_payload: payload,
             parents: event_kind,
             author,
+            time_created,
         })
     }
 
@@ -188,11 +194,11 @@ mod tests {
             },
         };
         let results = vec![
-            Event::new(0, Kind::Genesis, 0)?,
-            Event::new(0, Kind::Genesis, 1)?,
-            Event::new(0, Kind::Regular(mock_parents.clone()), 0)?,
-            Event::new(1234567, Kind::Genesis, 0)?,
-            Event::new(1234567, Kind::Regular(mock_parents.clone()), 0)?,
+            Event::new(0, Kind::Genesis, 0, 0)?,
+            Event::new(0, Kind::Genesis, 1, 0)?,
+            Event::new(0, Kind::Regular(mock_parents.clone()), 0, 0)?,
+            Event::new(1234567, Kind::Genesis, 0, 0)?,
+            Event::new(1234567, Kind::Regular(mock_parents.clone()), 0, 1)?,
         ];
         Ok(results)
     }
@@ -201,11 +207,11 @@ mod tests {
     fn events_create() {
         create_events().unwrap();
         // also test on various payloads
-        Event::new((), Kind::Genesis, 0).unwrap();
-        Event::new((0,), Kind::Genesis, 0).unwrap();
-        Event::new(vec![()], Kind::Genesis, 0).unwrap();
-        Event::new("asdassa", Kind::Genesis, 0).unwrap();
-        Event::new("asdassa".to_owned(), Kind::Genesis, 0).unwrap();
+        Event::new((), Kind::Genesis, 0, 0).unwrap();
+        Event::new((0,), Kind::Genesis, 0, 0).unwrap();
+        Event::new(vec![()], Kind::Genesis, 0, 0).unwrap();
+        Event::new("asdassa", Kind::Genesis, 0, 0).unwrap();
+        Event::new("asdassa".to_owned(), Kind::Genesis, 0, 0).unwrap();
     }
 
     #[test]
