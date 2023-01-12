@@ -113,7 +113,7 @@ pub struct Graph<TPayload> {
     witnesses: HashMap<event::Hash, WitnessFamousness>,
     /// Cache, shouldn't be relied upon (however seems as reliable as `round_index`)
     round_of: HashMap<event::Hash, RoundNum>,
-    ordering_data_cache: HashMap<event::Hash, (usize, u64, event::Hash)>,
+    ordering_data_cache: HashMap<event::Hash, (usize, Timestamp, event::Hash)>,
     /// The latest round known to have its fame decided. All previous rounds
     /// must be decided as well.
     ///
@@ -477,7 +477,7 @@ where
     fn ordered_events(
         &mut self,
         target_round_received: usize,
-    ) -> Result<Vec<(event::Hash, u64, event::Hash)>, OrderedEventsError> {
+    ) -> Result<Vec<(event::Hash, Timestamp, event::Hash)>, OrderedEventsError> {
         // We want to find all events with `round_received` == `target_round_received`.
         // To do it we start from witnesses of round `target_round_received`, since
         // no later rounds can have their `round_received` <= than our value of interest.
@@ -936,7 +936,7 @@ impl<TPayload> Graph<TPayload> {
     fn ordering_data(
         &self,
         event_hash: &event::Hash,
-    ) -> Result<(usize, u64, event::Hash), OrderingDataError> {
+    ) -> Result<(usize, Timestamp, event::Hash), OrderingDataError> {
         // is result cached?
         if let Some(cached) = self.ordering_data_cache.get(event_hash) {
             return Ok(cached.clone());

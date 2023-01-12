@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::graph::event;
+use crate::{graph::event, Timestamp};
 
 /// Stores finalized/ordered events. We know the order of events that a
 /// decided round "sees" (not actually sees as definition says but has
@@ -41,7 +41,7 @@ impl OrderedEvents {
     pub fn add_received_round(
         &mut self,
         round: usize,
-        events: impl Iterator<Item = (event::Hash, u64, event::Hash)>, // TODO: use newtypes where applicable
+        events: impl Iterator<Item = (event::Hash, Timestamp, event::Hash)>, // TODO: use newtypes where applicable
         unique_famous_witness_sigs: Vec<event::Hash>,
     ) -> Result<(), RoundAddError> {
         self.verify_round_number(round)?;

@@ -164,9 +164,8 @@ impl<TPayload> Event<TPayload> {
         &self.author
     }
 
-    pub fn timestamp(&self) -> &u64 {
-        // TODO: remove stub
-        return &123;
+    pub fn timestamp(&self) -> &u128 {
+        &self.time_created
     }
 }
 
