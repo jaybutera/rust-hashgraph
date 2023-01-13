@@ -1,6 +1,38 @@
-use std::{hash::Hash, iter::repeat, ops::Deref};
+use std::{
+    hash::Hash,
+    iter::{repeat, successors},
+    ops::Deref,
+};
 
 use super::*;
+/// Filter for `tracing_subscriber` that passes all messages from the given function.
+/// Should be useful for debugging test cases (actually was at least once).
+///
+/// # Usage
+///
+/// ```
+/// use tracing_subscriber::prelude::*;
+///
+/// let my_filter = function_only_filter!("ordering_data");
+/// tracing_subscriber::registry()
+///     .with(tracing_subscriber::fmt::layer())
+///     .with(my_filter)
+///     .init();
+/// ```
+#[allow(unused)]
+macro_rules! function_only_filter {
+    ($function_name:literal) => {
+        tracing_subscriber::filter::DynFilterFn::new(|metadata, cx| {
+            if metadata.is_span() && metadata.name() == $function_name {
+                return true;
+            }
+            if let Some(current_span) = cx.lookup_current() {
+                return current_span.name() == $function_name;
+            }
+            false
+        })
+    };
+}
 
 /// `run_tests!(tested_function_name, tested_function, name_lookup, peer_literal, cases)`
 /// # Description
@@ -458,7 +490,7 @@ where
     T: Serialize + Copy + Default + Eq + Hash,
 {
     let author_ids = HashMap::from([("a", 0), ("b", 1), ("c", 2), ("d", 3), ("e", 4)]);
-    let mut graph = Graph::new(*author_ids.get("a").unwrap(), payload, coin_frequency);
+    let mut graph = Graph::new(*author_ids.get("a").unwrap(), payload, 0, coin_frequency);
     let mut names = add_geneses(&mut graph, "a", &author_ids, payload)?;
     let events = [
         //  (name, peer, other_parent)
@@ -501,7 +533,7 @@ where
         o  o  o  -- (g1,g2,g3)
     */
     let author_ids = HashMap::from([("g1", 0), ("g2", 1), ("g3", 2)]);
-    let mut graph = Graph::new(*author_ids.get("g1").unwrap(), payload, coin_frequency);
+    let mut graph = Graph::new(*author_ids.get("g1").unwrap(), payload, 0, coin_frequency);
     let mut names = add_geneses(&mut graph, "g1", &author_ids, payload)?;
     let events = [
         //  (name, peer, other_parent)
@@ -548,7 +580,7 @@ where
     // also in resources/graph_example.png
 
     let author_ids = HashMap::from([("a", 0), ("b", 1), ("c", 2), ("d", 3)]);
-    let mut graph = Graph::new(*author_ids.get("a").unwrap(), payload, coin_frequency);
+    let mut graph = Graph::new(*author_ids.get("a").unwrap(), payload, 0, coin_frequency);
     let mut names = add_geneses(&mut graph, "a", &author_ids, payload)?;
     // resources/graph_example.png for reference
     let events = [
@@ -629,6 +661,7 @@ where
     let mut graph = Graph::new(
         *author_ids.get("a").unwrap(),
         payload.next().expect("Iterator finished"),
+        0,
         coin_frequency,
     );
     let mut names = add_geneses(
@@ -670,7 +703,7 @@ where
     // Graph to test round_index assignment. It seems that the logic is broken slightly,
     // this should fail with existing impl.
     let author_ids = HashMap::from([("a", 0), ("b", 1), ("c", 2), ("d", 3)]);
-    let mut graph = Graph::new(*author_ids.get("b").unwrap(), payload, coin_frequency);
+    let mut graph = Graph::new(*author_ids.get("b").unwrap(), payload, 0, coin_frequency);
     let mut names = add_geneses(&mut graph, "b", &author_ids, payload)?;
     // resources/graph_example.png for reference
     let events = [
@@ -1726,9 +1759,10 @@ fn test_ordering_decided() {
                         &peers.get("d").unwrap().events[0],
                         &peers.get("d").unwrap().events[1],
                         &peers.get("d").unwrap().events[2],
+                        &peers.get("d").unwrap().events[3],
                         // For some reason they do not consider this event in "detailed examples"
                         // however it seems to fit the needed properties.
-                        &peers.get("d").unwrap().events[3],
+                        &peers.get("d").unwrap().events[4],
                     ],
                 ),
                 test_case => (
@@ -1750,7 +1784,7 @@ fn test_ordering_decided() {
 #[test]
 fn test_ordering_data_correct() {
     run_tests!(
-        tested_function_name => "ordering_data decided",
+        tested_function_name => "ordering_data correct values",
         tested_function => |g, event| g.ordering_data(*event),
         name_lookup => |names, event| names.get(event).unwrap().to_owned(),
         peers_literal => peers,
@@ -1793,11 +1827,77 @@ fn test_ordering_data_correct() {
                     expect: Ok((1, 0, peers.get("d").unwrap().events[2].clone())),
                     arguments: vec![&peers.get("d").unwrap().events[2]],
                 ),
-                // For some reason they do not consider this event in "detailed examples"
-                // however it seems to fit the needed properties.
                 test_case => (
                     expect: Ok((1, 0, peers.get("d").unwrap().events[3].clone())),
                     arguments: vec![&peers.get("d").unwrap().events[3]],
+                ),
+                // For some reason they do not consider this event in "detailed examples"
+                // however it seems to fit the needed properties.
+                test_case => (
+                    expect: Ok((1, 0, peers.get("d").unwrap().events[4].clone())),
+                    arguments: vec![&peers.get("d").unwrap().events[4]],
+                ),
+                test_case => (
+                    expect: Err(OrderingDataError::Undecided),
+                    arguments: [
+                        &peers.get("a").unwrap().events[2..],
+                        &peers.get("b").unwrap().events[3..],
+                        &peers.get("c").unwrap().events[1..],
+                        &peers.get("d").unwrap().events[5..],
+                    ].iter()
+                        .flat_map(|s| s.iter().collect::<Vec<&_>>())
+                        .collect(),
+                ),
+            ),
+            (
+                setup => build_graph_detailed_example_with_timestamps(
+                    0, 999, successors(Some(1), |x| Some(x+1))
+                ).unwrap(),
+                test_case => (
+                    expect: Ok((1, 9, peers.get("a").unwrap().events[0].clone())),
+                    arguments: vec![&peers.get("a").unwrap().events[0]],
+                ),
+                test_case => (
+                    expect: Ok((1, 9, peers.get("a").unwrap().events[1].clone())),
+                    arguments: vec![&peers.get("a").unwrap().events[1]],
+                ),
+                test_case => (
+                    expect: Ok((1, 1, peers.get("b").unwrap().events[0].clone())),
+                    arguments: vec![&peers.get("b").unwrap().events[0]],
+                ),
+                test_case => (
+                    expect: Ok((1, 3, peers.get("b").unwrap().events[1].clone())),
+                    arguments: vec![&peers.get("b").unwrap().events[1]],
+                ),
+                test_case => (
+                    expect: Ok((1, 6, peers.get("b").unwrap().events[2].clone())),
+                    arguments: vec![&peers.get("b").unwrap().events[2]],
+                ),
+                test_case => (
+                    expect: Ok((1, 6, peers.get("c").unwrap().events[0].clone())),
+                    arguments: vec![&peers.get("c").unwrap().events[0]],
+                ),
+                test_case => (
+                    expect: Ok((1, 2, peers.get("d").unwrap().events[0].clone())),
+                    arguments: vec![&peers.get("d").unwrap().events[0]],
+                ),
+                test_case => (
+                    expect: Ok((1, 2, peers.get("d").unwrap().events[1].clone())),
+                    arguments: vec![&peers.get("d").unwrap().events[1]],
+                ),
+                test_case => (
+                    expect: Ok((1, 8, peers.get("d").unwrap().events[2].clone())),
+                    arguments: vec![&peers.get("d").unwrap().events[2]],
+                ),
+                test_case => (
+                    expect: Ok((1, 8, peers.get("d").unwrap().events[3].clone())),
+                    arguments: vec![&peers.get("d").unwrap().events[3]],
+                ),
+                // For some reason they do not consider this event in "detailed examples"
+                // however it seems to fit the needed properties.
+                test_case => (
+                    expect: Ok((1, 10, peers.get("d").unwrap().events[4].clone())),
+                    arguments: vec![&peers.get("d").unwrap().events[4]],
                 ),
                 test_case => (
                     expect: Err(OrderingDataError::Undecided),

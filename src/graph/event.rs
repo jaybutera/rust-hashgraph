@@ -5,7 +5,7 @@ use serde_big_array::BigArray;
 use crate::{PeerId, Timestamp};
 
 // smth like H256 ??? (some hash type)
-#[derive(Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug)]
+#[derive(Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
 pub struct Hash {
     #[serde(with = "BigArray")]
     inner: [u8; 64],
@@ -14,6 +14,14 @@ pub struct Hash {
 impl std::fmt::Display for Hash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:X?}", self.inner)
+    }
+}
+
+impl std::fmt::Debug for Hash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Hash")
+            .field("hex_value", &format!("{self}"))
+            .finish()
     }
 }
 

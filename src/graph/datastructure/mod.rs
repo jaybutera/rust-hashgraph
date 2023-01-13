@@ -131,7 +131,12 @@ impl<TPayload> Graph<TPayload>
 where
     TPayload: Serialize + Eq + std::hash::Hash,
 {
-    pub fn new(self_id: PeerId, genesis_payload: TPayload, coin_frequency: usize) -> Self {
+    pub fn new(
+        self_id: PeerId,
+        genesis_payload: TPayload,
+        genesis_timestamp: Timestamp,
+        coin_frequency: usize,
+    ) -> Self {
         let mut graph = Self {
             all_events: HashMap::new(),
             peer_index: HashMap::new(),
@@ -150,10 +155,7 @@ where
                 genesis_payload,
                 PushKind::Genesis,
                 self_id,
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Written without time travel in mind")
-                    .as_millis(),
+                genesis_timestamp,
             )
             .expect("Genesis events should be valid");
         graph
@@ -382,9 +384,8 @@ where
                 match self.is_famous_witness(event_hash) {
                     Ok(WitnessFamousness::Undecided) => {
                         debug!(
-                            "Event {} is not decided, so {} is the latest one to be decided",
-                            event_hash,
-                            checked_round - 1
+                            "Event {} is not decided, so {}-1 is the next one to be decided",
+                            event_hash, checked_round
                         );
                         return progress_made;
                     }
@@ -459,11 +460,11 @@ where
             }
             Err(e) => {
                 match e {
-                    OrderedEventsError::UnknownRound => warn!(
+                    OrderedEventsError::UndecidedRound => warn!(
                         "No events ordered by round {} were found for some reason",
                         decided_round
                     ),
-                    OrderedEventsError::UndecidedRound => {
+                    OrderedEventsError::UnknownRound => {
                         error!("Round {} is handled, but it is unknown!", decided_round);
                     }
                 };
@@ -933,14 +934,18 @@ impl<TPayload> Graph<TPayload> {
     /// It consists of
     /// `(round_received, consensus_timestamp, event_signature)`.
     /// `round_received` can be understood as the round this event is finalized.
+    #[instrument(level = "trace", skip_all)]
     fn ordering_data(
         &self,
         event_hash: &event::Hash,
     ) -> Result<(usize, Timestamp, event::Hash), OrderingDataError> {
         // is result cached?
+        trace!("Checking cache if ordering data is already present there");
         if let Some(cached) = self.ordering_data_cache.get(event_hash) {
+            trace!("Cache hit!");
             return Ok(cached.clone());
         }
+        trace!("No luck in cache, calculating..");
 
         // check that the event is known in advance
         let event_signature = self
@@ -956,6 +961,7 @@ impl<TPayload> Graph<TPayload> {
         // round that satisfies the condition, we start from round of `x` forward to
         // get `r`.
         for checked_round in self.round_of(event_hash)..self.round_index.len() {
+            trace!("Checking round {}", checked_round);
             let unique_famous_witnesses = match self.round_unique_famous_witnesses(checked_round) {
                 Ok(list) => list,
                 // round before this did not satisfy our condition and later ones
@@ -965,11 +971,13 @@ impl<TPayload> Graph<TPayload> {
                     panic!("`checked_round` range boundary must not allow this")
                 }
             };
+            trace!("Found {} ufw in the round", unique_famous_witnesses.len());
             // Is `x` an ancestor of every round `r` unique famous witness?
             if unique_famous_witnesses
                 .iter()
                 .all(|ufw| self.is_ancestor(ufw, event_hash))
             {
+                trace!("The event of interest is an ancestor of them all");
                 // set of each event z such that z is
                 // a self-ancestor of a round r unique famous
                 // witness, and x is an ancestor of z but not
@@ -992,15 +1000,20 @@ impl<TPayload> Graph<TPayload> {
                 });
                 let mut timestamps: Vec<_> = s.map(|event| event.timestamp()).collect();
                 timestamps.sort();
+                trace!("Found {} corresponding events-receivers", timestamps.len());
+                trace!("Their timestamps (sorted): {:?}", timestamps);
                 // Note that we assume a supermajority of honest members and
                 // the median is taken here. Thus this median value will always be
                 // in range of honest timestamps.
                 let consensus_timestamp = **timestamps
                     .get(timestamps.len() / 2)
                     .expect("there must be some unique famous witnesses in a round");
+                trace!("Median is {}", consensus_timestamp);
                 return Ok((checked_round, consensus_timestamp, event_signature.clone()));
             }
+            trace!("The event of interest is NOT an ancestor of them all, continuing..");
         }
+        trace!("Couldn't find set of unique famous witnesses that will order the event.");
         Err(OrderingDataError::Undecided)
     }
 
