@@ -11,8 +11,9 @@ pub struct PeerIndexEntry {
     /// Forks authored by the peer that we've observed. Forks are events
     /// that have the same `self_parent`.
     ///
-    /// Represented by a mapping from `self_parent` to the forked events
-    forks: HashMap<event::Hash, HashSet<event::Hash>>,
+    /// Represented by event hashes that have multiple self children
+    /// (childr authored by the same peer)
+    forks: HashSet<event::Hash>,
     // Genesis at start
     latest_event: event::Hash,
 }
@@ -23,7 +24,7 @@ impl PeerIndexEntry {
         Self {
             genesis,
             authored_events: HashMap::new(),
-            forks: HashMap::new(),
+            forks: HashSet::new(),
             latest_event,
         }
     }
@@ -40,9 +41,10 @@ impl PeerIndexEntry {
     }
 
     /// Idempotent, i.e. adding already tracked fork won't change anything
-    pub fn add_fork(&mut self, parent: event::Hash, child: event::Hash) {
-        let fork_list = self.forks.entry(parent).or_default();
-        fork_list.insert(child);
+    ///
+    /// Returns if the fork was already tracked
+    pub fn add_fork(&mut self, parent: event::Hash) -> bool {
+        self.forks.insert(parent)
     }
 
     pub fn latest_event(&self) -> &event::Hash {

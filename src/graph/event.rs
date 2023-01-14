@@ -80,8 +80,38 @@ pub struct Event<TPayload> {
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
 pub struct Children {
-    pub self_child: Vec<Hash>,
+    // Child(-ren in case of forks) with the same author
+    pub self_child: SelfChild,
+    // Children created by different peers
     pub other_children: Vec<Hash>,
+}
+
+#[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
+pub enum SelfChild {
+    HonestParent(Option<Hash>),
+    ForkingParent(Vec<Hash>),
+}
+
+impl SelfChild {
+    /// Returns `true` if the parent became dishonest/forking
+    pub fn add_child(&mut self, child: Hash) -> bool {
+        // guilty until proven innocent lol :)
+        let mut dishonesty = true;
+        match self {
+            SelfChild::HonestParent(self_child_entry) => {
+                let new_val = match self_child_entry {
+                    None => {
+                        dishonesty = false;
+                        Self::HonestParent(Some(child))
+                    }
+                    Some(child_2) => Self::ForkingParent(vec![child, child_2.clone()]),
+                };
+                *self = new_val;
+            }
+            SelfChild::ForkingParent(children) => children.push(child),
+        };
+        dishonesty
+    }
 }
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
@@ -106,7 +136,7 @@ impl<TPayload: Serialize> Event<TPayload> {
         let hash = Self::calculate_hash(&payload, &event_kind, &author)?;
         Ok(Event {
             children: Children {
-                self_child: vec![],
+                self_child: SelfChild::HonestParent(None),
                 other_children: vec![],
             },
             id: hash,

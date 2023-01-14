@@ -248,16 +248,14 @@ where
                 // TODO: move validation in a diff function
 
                 trace!("Updating pointers of parents");
-                if let Some(sibling) = self_parent_event.children.self_child.get(0) {
-                    // Track the fork. Add is idempotent, so it's ok to add the sibling.
-                    author_index.add_fork(self_parent_event.hash().clone(), sibling.clone());
-                    author_index
-                        .add_fork(self_parent_event.hash().clone(), new_event.hash().clone());
-                }
-                self_parent_event
+                let dishonest_parent = self_parent_event
                     .children
                     .self_child
-                    .push(new_event.hash().clone());
+                    .add_child(new_event.hash().clone());
+                if dishonest_parent {
+                    // Track the fork. Add is idempotent, so it's ok to add the sibling.
+                    author_index.add_fork(self_parent_event.hash().clone());
+                }
                 let other_parent_event = self
                     .all_events
                     .get_mut(&parents.other_parent)
