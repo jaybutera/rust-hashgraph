@@ -16,14 +16,14 @@ use crate::{PeerId, Timestamp};
 mod ordering;
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum WitnessFamousness {
+enum WitnessFamousness {
     Yes,
     No,
     Undecided,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum WitnessUniqueFamousness {
+enum WitnessUniqueFamousness {
     FamousUnique,
     FamousNotUnique,
     NotFamous,
@@ -31,7 +31,7 @@ pub enum WitnessUniqueFamousness {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct UniquenessNotProvided;
+struct UniquenessNotProvided;
 
 impl TryFrom<WitnessFamousness> for WitnessUniqueFamousness {
     type Error = UniquenessNotProvided;
@@ -69,7 +69,7 @@ impl From<WitnessUniqueFamousness> for WitnessFamousness {
 }
 
 #[derive(Error, Debug, PartialEq)]
-pub enum WitnessCheckError {
+enum WitnessCheckError {
     #[error("This event is not a witness")]
     NotWitness,
     #[error(transparent)]
@@ -78,10 +78,10 @@ pub enum WitnessCheckError {
 
 #[derive(Error, Debug, PartialEq)]
 #[error("Event with such hash is unknown to the graph")]
-pub struct UnknownEvent;
+struct UnknownEvent;
 
 #[derive(Error, Debug, PartialEq)]
-pub enum RoundUfwListError {
+enum RoundUfwListError {
     #[error("Round with this number is unknown yet")]
     UnknownRound,
     #[error("Fame of some witnesses in the round is undecided")]
@@ -89,7 +89,7 @@ pub enum RoundUfwListError {
 }
 
 #[derive(Error, Debug, PartialEq)]
-pub enum OrderingDataError {
+enum OrderingDataError {
     #[error("No event with such hash is tracked")]
     UnknownEvent,
     #[error("Ordering for the event is undecided")]
@@ -97,7 +97,7 @@ pub enum OrderingDataError {
 }
 
 #[derive(Error, Debug, PartialEq)]
-pub enum OrderedEventsError {
+enum OrderedEventsError {
     #[error("Provided round number is not present in the graph")]
     UnknownRound,
     #[error("Given round is undecided")]
@@ -585,10 +585,7 @@ impl<TPayload> Graph<TPayload> {
     }
 
     /// Iterator over ancestors of the event
-    pub fn ancestor_iter<'a>(
-        &'a self,
-        event_hash: &'a event::Hash,
-    ) -> Option<AncestorIter<TPayload>> {
+    fn ancestor_iter<'a>(&'a self, event_hash: &'a event::Hash) -> Option<AncestorIter<TPayload>> {
         let event = self.all_events.get(event_hash)?;
         let mut e_iter = AncestorIter::new(&self.all_events, event_hash);
 
@@ -599,7 +596,7 @@ impl<TPayload> Graph<TPayload> {
     }
 
     /// Iterator over self ancestors of the event
-    pub fn self_ancestor_iter<'a>(
+    fn self_ancestor_iter<'a>(
         &'a self,
         event_hash: &'a event::Hash,
     ) -> Option<SelfAncestorIter<TPayload>> {
@@ -728,7 +725,7 @@ impl<TPayload> Graph<TPayload> {
     }
 
     /// Determines if the event is a witness
-    pub fn determine_witness(&self, event_hash: &event::Hash) -> Result<bool, UnknownEvent> {
+    fn determine_witness(&self, event_hash: &event::Hash) -> Result<bool, UnknownEvent> {
         let r = match self
             .all_events
             .get(&event_hash)
@@ -743,7 +740,7 @@ impl<TPayload> Graph<TPayload> {
         Ok(r)
     }
 
-    pub fn decide_fame_for_witness(
+    fn decide_fame_for_witness(
         &mut self,
         event_hash: &event::Hash,
     ) -> Result<(), WitnessCheckError> {
@@ -756,7 +753,7 @@ impl<TPayload> Graph<TPayload> {
     /// An event is famous if it is a witness and 2/3 of future witnesses strongly see it.
     ///
     /// None if the event is not witness, otherwise reports famousness
-    pub fn is_famous_witness(
+    fn is_famous_witness(
         &self,
         event_hash: &event::Hash,
     ) -> Result<WitnessFamousness, WitnessCheckError> {
@@ -862,7 +859,7 @@ impl<TPayload> Graph<TPayload> {
         Ok(WitnessFamousness::Undecided)
     }
 
-    pub fn is_unique_famous_witness(
+    fn is_unique_famous_witness(
         &self,
         event_hash: &event::Hash,
     ) -> Result<WitnessUniqueFamousness, WitnessCheckError> {
@@ -1051,17 +1048,14 @@ impl<TPayload> Graph<TPayload> {
     }
 }
 
-pub struct AncestorIter<'a, T> {
+struct AncestorIter<'a, T> {
     event_list: Vec<&'a Event<T>>,
     all_events: &'a HashMap<event::Hash, Event<T>>,
     visited_events: HashSet<&'a event::Hash>,
 }
 
 impl<'a, T> AncestorIter<'a, T> {
-    pub fn new(
-        all_events: &'a HashMap<event::Hash, Event<T>>,
-        ancestors_of: &'a event::Hash,
-    ) -> Self {
+    fn new(all_events: &'a HashMap<event::Hash, Event<T>>, ancestors_of: &'a event::Hash) -> Self {
         let mut iter = AncestorIter {
             event_list: vec![],
             all_events: all_events,
@@ -1107,12 +1101,12 @@ impl<'a, T> Iterator for AncestorIter<'a, T> {
     }
 }
 
-pub struct SelfAncestorIter<'a, T> {
+struct SelfAncestorIter<'a, T> {
     event_list: VecDeque<&'a Event<T>>,
 }
 
 impl<'a, T> SelfAncestorIter<'a, T> {
-    pub fn new(
+    fn new(
         all_events: &'a HashMap<event::Hash, Event<T>>,
         ancestors_of: &'a event::Hash,
     ) -> Option<Self> {
@@ -1145,7 +1139,7 @@ impl<'a, T> DoubleEndedIterator for SelfAncestorIter<'a, T> {
     }
 }
 
-pub struct SliceIterator<'a, TPayload, FStop> {
+struct SliceIterator<'a, TPayload, FStop> {
     current_slice: HashSet<&'a Event<TPayload>>,
     stop_iterate_peer: FStop,
     all_events: &'a HashMap<event::Hash, Event<TPayload>>,
