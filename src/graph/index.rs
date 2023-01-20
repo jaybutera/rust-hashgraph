@@ -86,6 +86,7 @@ impl PeerIndexEntry {
         // TODO: represent it in some way in the code. E.g. by creating 2 functions
         // where the first one may fail but works with immutable reference and the
         // second one does not fail but makes changes.
+        // Otherwise it needs to be carefully reviewed by hand :(
 
         if self.authored_events.contains_key(&event) {
             return Err(AddForkError::EventAlreadyKnown);
@@ -114,21 +115,22 @@ impl PeerIndexEntry {
             event::SelfChild::HonestParent(Some(firstborn)) => {
                 // It is the second self child, so we creating a new fork
                 let identifier = Self::find_fork_identifier(&self_parent, event_lookup)?;
-                // checks are completed, start updating the state
+                // completing the checks and starting to update the state
                 self.fork_index.add_new_fork(
                     &identifier,
                     self_parent,
                     *parent_height,
                     event.clone(),
                     firstborn,
-                );
+                )?;
             }
             event::SelfChild::ForkingParent(_) => {
                 // Its parent already has forks, so we just add another one
                 let identifier = Self::find_fork_identifier(&self_parent, event_lookup)?;
-                // checks are completed, start updating the state
+                // completing the checks and starting to update the state
                 self.fork_index
-                    .add_branch_to_fork(&identifier, event.clone());
+                    .add_branch_to_fork(&identifier, event.clone())
+                    .map_err(|e| <LookupIndexInconsistency>::from(e))?;
             }
         }
         self.authored_events.insert(event, parent_height + 1);
@@ -177,8 +179,8 @@ impl PeerIndexEntry {
 }
 
 /// Node that represents a sequence of events without branching/forking
-#[derive(Debug)]
-struct Extension {
+#[derive(Debug, Clone)]
+pub struct Extension {
     first: event::Hash,
     first_height: usize,
     last: event::Hash,
@@ -220,8 +222,8 @@ impl Extension {
 }
 
 /// Sequence of events without any forks at the end
-#[derive(Debug)]
-struct Leaf(Extension);
+#[derive(Debug, Clone)]
+pub struct Leaf(Extension);
 
 impl Leaf {
     /// Insert a new leaf within this leaf, creating new fork.
@@ -255,8 +257,8 @@ impl Leaf {
 }
 
 /// Sequence of events with branching at the end
-#[derive(Debug)]
-struct Fork {
+#[derive(Debug, Clone)]
+pub struct Fork {
     events: Extension,
     /// First elements of each child
     forks: Vec<event::Hash>,
@@ -409,14 +411,17 @@ impl ForkIndex {
     /// ```
     pub fn add_new_fork(
         &mut self,
-        previous_fork_identifier: &event::Hash,
+        extension_identifier: &event::Hash,
         forking_parent: event::Hash,
         forking_parent_height: usize,
         new_self_child: event::Hash,
         other_self_child: event::Hash,
     ) -> Result<(), LookupIndexInconsistency> {
-        if let Some(fork) = self.forks.remove(previous_fork_identifier) {
+        // Not `remove` because we don't want to arrive at
+        // inconsistent state in case of error
+        if let Some(fork) = self.forks.get(extension_identifier).cloned() {
             let (parent_fork, firstborn_fork, newborn_leaf) = fork
+                .clone()
                 .attach_leaf(
                     forking_parent,
                     forking_parent_height,
@@ -424,11 +429,13 @@ impl ForkIndex {
                     new_self_child,
                 )
                 .ok_or(LookupIndexInconsistency::InvalidHeight)?;
+            // Now no errors can happen, so we're safe to remove
+            self.forks.remove(extension_identifier);
             self.insert_fork(parent_fork);
             self.insert_fork(firstborn_fork);
             self.insert_leaf(newborn_leaf);
             Ok(())
-        } else if let Some(leaf) = self.remove_leaf(previous_fork_identifier) {
+        } else if let Some(leaf) = self.leafs.get(extension_identifier).cloned() {
             let (parent_fork, firstborn_leaf, newborn_leaf) = leaf
                 .attach_leaf(
                     forking_parent,
@@ -437,6 +444,8 @@ impl ForkIndex {
                     new_self_child,
                 )
                 .ok_or(LookupIndexInconsistency::InvalidHeight)?;
+            // Now no errors can happen, so we're safe to remove
+            self.remove_leaf(extension_identifier);
             self.insert_fork(parent_fork);
             self.insert_leaf(firstborn_leaf);
             self.insert_leaf(newborn_leaf);
@@ -515,6 +524,13 @@ impl ForkIndex {
         parent_fork.forks.push(new_self_child);
         Ok(())
     }
+
+    pub fn iter(&self) -> ForkIndexIter {
+        ForkIndexIter {
+            index: self,
+            queued_entries: vec![&self.origin],
+        }
+    }
 }
 
 enum ForkIndexEntry<'a> {
@@ -522,20 +538,22 @@ enum ForkIndexEntry<'a> {
     Leaf(&'a Leaf),
 }
 
-struct ForkIndexIterator<'a> {
+struct ForkIndexIter<'a> {
     index: &'a ForkIndex,
-    queued_entries: Vec<event::Hash>,
+    queued_entries: Vec<&'a event::Hash>,
 }
 
-/// Iterate over all forks/leafs
-impl<'a> Iterator for ForkIndexIterator<'a> {
+/// Iterate over all forks/leafs. For a <parent> - <child> pair
+/// in the index tree, never traverses child before parent
+/// (basically DFS or BFS).
+impl<'a> Iterator for ForkIndexIter<'a> {
     type Item = ForkIndexEntry<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let next_entry = self.queued_entries.pop()?;
-        if let Some(fork) = self.index.forks.get(&next_entry) {
+        if let Some(fork) = self.index.forks.get(next_entry) {
             Some(ForkIndexEntry::Fork(fork))
-        } else if let Some(leaf) = self.index.leafs.get(&next_entry) {
+        } else if let Some(leaf) = self.index.leafs.get(next_entry) {
             Some(ForkIndexEntry::Leaf(leaf))
         } else {
             None
