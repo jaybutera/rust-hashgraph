@@ -14,6 +14,7 @@ use super::{PushError, PushKind, RoundNum};
 use crate::{PeerId, Timestamp};
 
 mod ordering;
+mod sync;
 
 #[derive(Debug, PartialEq, Clone)]
 enum WitnessFamousness {
@@ -104,9 +105,11 @@ enum OrderedEventsError {
     UndecidedRound,
 }
 
+pub type PeerIndex = HashMap<PeerId, PeerIndexEntry>;
+
 pub struct Graph<TPayload> {
     all_events: EventIndex<Event<TPayload>>,
-    peer_index: HashMap<PeerId, PeerIndexEntry>,
+    peer_index: PeerIndex,
     /// Consistent and reliable index (should be)
     round_index: Vec<HashSet<event::Hash>>,
     /// Some(false) means unfamous witness
@@ -248,13 +251,16 @@ where
                 // TODO: move validation in a diff function
 
                 trace!("Updating pointers of parents");
-                let dishonest_parent = self_parent_event
+                self_parent_event
                     .children
                     .self_child
                     .add_child(new_event.hash().clone());
-                if dishonest_parent {
-                    // Track the fork. Add is idempotent, so it's ok to add the sibling.
-                    author_index.add_fork(self_parent_event.hash().clone());
+                if let Err(e) = author_index.add_event(
+                    self_parent_event.hash().clone(),
+                    new_event.hash().clone(),
+                    |h| self.all_events.get(h),
+                ) {
+                    warn!("Inconsistent state: `author_index` contains events that are not tracked by `all_events`");
                 }
                 let other_parent_event = self
                     .all_events
@@ -264,9 +270,6 @@ where
                     .children
                     .other_children
                     .push(new_event.hash().clone());
-                if let Some(_) = author_index.add_latest(new_event.hash().clone()) {
-                    warn!("Inconsistent state: `author_index` contains events that are not tracked by `all_events`");
-                }
             }
         };
 
@@ -321,6 +324,15 @@ where
                 .get(hash)
                 .expect("ordered events must be tracked")
         })
+    }
+}
+
+impl<TPayload> Graph<TPayload>
+// where
+//     TPayload: Serialize + Eq + std::hash::Hash,
+{
+    pub fn graph_known_state(&self) -> sync::CompressedKnownState {
+        todo!();
     }
 }
 
@@ -761,6 +773,8 @@ impl<TPayload> Graph<TPayload> {
         if !self.determine_witness(event_hash)? {
             return Err(WitnessCheckError::NotWitness);
         }
+
+        // TODO: use `witnesses` as cache (return famous if so, recalculate if not)
 
         let r = self.round_of(event_hash);
 

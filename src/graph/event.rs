@@ -74,7 +74,7 @@ pub struct Event<TPayload> {
     user_payload: TPayload,
     parents: Kind,
     author: PeerId,
-    // TODO: create timestamps
+    /// Timestamp set by author
     time_created: Timestamp,
 }
 
@@ -111,6 +111,35 @@ impl SelfChild {
             SelfChild::ForkingParent(children) => children.push(child),
         };
         dishonesty
+    }
+
+    /// Returns `true` if the child was removed (thus was present before removal)
+    pub fn with_child_removed(self, child: &Hash) -> Self {
+        let self_children_vec: Vec<_> = self.into();
+        self_children_vec
+            .into_iter()
+            .filter(|h| h != child)
+            .collect::<Vec<_>>()
+            .into()
+    }
+}
+
+impl Into<Vec<Hash>> for SelfChild {
+    fn into(self) -> Vec<Hash> {
+        match self {
+            SelfChild::HonestParent(child_opt) => child_opt.into_iter().collect(),
+            SelfChild::ForkingParent(children_list) => children_list,
+        }
+    }
+}
+
+impl From<Vec<Hash>> for SelfChild {
+    fn from(value: Vec<Hash>) -> Self {
+        match &value[..] {
+            [] => Self::HonestParent(None),
+            [_] => Self::HonestParent(Some(value.into_iter().next().unwrap())),
+            _ => Self::ForkingParent(value),
+        }
     }
 }
 
