@@ -260,7 +260,7 @@ where
                     new_event.hash().clone(),
                     |h| self.all_events.get(h),
                 ) {
-                    warn!("Inconsistent state: `author_index` contains events that are not tracked by `all_events`");
+                    warn!("Peer index insertion error: {}", e);
                 }
                 let other_parent_event = self
                     .all_events
