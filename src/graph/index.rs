@@ -44,7 +44,7 @@ pub enum AddForkError {
 
 #[derive(Debug, Error)]
 #[error("Provided fork identifier is unknown")]
-pub struct InvalidForkIdentifier;
+struct InvalidForkIdentifier;
 
 #[derive(Debug, Error)]
 pub enum LookupIndexInconsistency {
@@ -57,7 +57,7 @@ pub enum LookupIndexInconsistency {
 }
 
 #[derive(Debug, Error)]
-pub enum LeafPush {
+enum LeafPush {
     #[error("Self parent is not known to be the latest event of some leaf")]
     InvalidSelfParent,
     #[error("Inconsistent fork tracking index")]
@@ -75,12 +75,15 @@ impl PeerIndexEntry {
         }
     }
 
-    pub fn add_event<TPayload>(
+    pub fn add_event<F, TPayload>(
         &mut self,
         self_parent: event::Hash,
         event: event::Hash,
-        event_lookup: &HashMap<event::Hash, event::Event<TPayload>>,
-    ) -> Result<(), AddForkError> {
+        event_lookup: F,
+    ) -> Result<(), AddForkError>
+    where
+        F: Fn(&event::Hash) -> Option<&event::Event<TPayload>>,
+    {
         // First do all checks, only then apply changes, to keep the state consistent
 
         // TODO: represent it in some way in the code. E.g. by creating 2 functions
@@ -91,9 +94,7 @@ impl PeerIndexEntry {
         if self.authored_events.contains_key(&event) {
             return Err(AddForkError::EventAlreadyKnown);
         }
-        let parent_event = event_lookup
-            .get(&self_parent)
-            .ok_or(AddForkError::UnknownParent)?;
+        let parent_event = event_lookup(&self_parent).ok_or(AddForkError::UnknownParent)?;
         let parent_height = self
             .authored_events
             .get(&self_parent)
@@ -137,18 +138,19 @@ impl PeerIndexEntry {
         Ok(())
     }
 
-    fn find_fork_identifier<TPayload>(
+    fn find_fork_identifier<F, TPayload>(
         target: &event::Hash,
-        event_lookup: &HashMap<event::Hash, event::Event<TPayload>>,
-    ) -> Result<event::Hash, AddForkError> {
-        let mut this_event = event_lookup
-            .get(target)
-            .ok_or(AddForkError::InconsistentLookup)?;
+        event_lookup: F,
+    ) -> Result<event::Hash, AddForkError>
+    where
+        F: Fn(&event::Hash) -> Option<&event::Event<TPayload>>,
+    {
+        let mut this_event = event_lookup(target).ok_or(AddForkError::InconsistentLookup)?;
         let mut prev_event = match this_event.parents() {
             event::Kind::Genesis => return Ok(target.clone()),
-            event::Kind::Regular(parents) => event_lookup
-                .get(&parents.self_parent)
-                .ok_or(AddForkError::InconsistentLookup)?,
+            event::Kind::Regular(parents) => {
+                event_lookup(&parents.self_parent).ok_or(AddForkError::InconsistentLookup)?
+            }
         };
         while let event::Kind::Regular(parents) = prev_event.parents() {
             let prev_self_children: event::SelfChild = prev_event
@@ -161,9 +163,8 @@ impl PeerIndexEntry {
                 return Ok(this_event.hash().clone());
             }
             this_event = prev_event;
-            prev_event = event_lookup
-                .get(&parents.self_parent)
-                .ok_or(AddForkError::InconsistentLookup)?
+            prev_event =
+                event_lookup(&parents.self_parent).ok_or(AddForkError::InconsistentLookup)?
         }
         // `prev_event` is genesis and thus it's the identifier
         Ok(prev_event.hash().clone())

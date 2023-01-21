@@ -258,8 +258,7 @@ where
                 if let Err(e) = author_index.add_event(
                     self_parent_event.hash().clone(),
                     new_event.hash().clone(),
-                    &self.all_events,
-                    // |h| self.all_events.get(h),
+                    |h| self.all_events.get(h),
                 ) {
                     warn!("Inconsistent state: `author_index` contains events that are not tracked by `all_events`");
                 }
