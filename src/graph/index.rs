@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use thiserror::Error;
+use tracing::{instrument, trace};
 
 use super::event;
 
@@ -25,13 +26,13 @@ pub struct PeerIndexEntry {
     latest_event: event::Hash,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq)]
 pub enum Error {
     #[error("Provided parent hash cannot be looked up with given method")]
     UnknownParent,
     #[error(
         "Provided parent does not have self children, however it is not \
-    tracked by fork index. Likely due to inconsistent state of the index with event contents."
+        tracked by fork index. Likely due to inconsistent state of the index with event contents."
     )]
     InvalidParent,
     #[error("Attempted to add an event that is already present in the index")]
@@ -40,28 +41,48 @@ pub enum Error {
     InconsistentLookup,
     #[error("State of the index and lookup state are inconsistent")]
     LookupIndexInconsistency(#[from] LookupIndexInconsistency),
+    #[error("Pushing leaf (non-forking) event failed")]
+    LeafPush(#[from] LeafPush),
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq)]
 #[error("Provided fork identifier is unknown")]
 pub struct InvalidForkIdentifier;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq)]
 pub enum LookupIndexInconsistency {
     #[error(transparent)]
-    LeafPush(#[from] LeafPush),
-    #[error(transparent)]
     InvalidIdentifier(#[from] InvalidForkIdentifier),
-    #[error("Fork height is out of bounds of the fork")]
-    InvalidHeight,
+    #[error("Splitting extension failed")]
+    SplitError(#[from] SplitError),
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq)]
 pub enum LeafPush {
     #[error("Self parent is not known to be the latest event of some leaf")]
     InvalidSelfParent,
     #[error("Inconsistent fork tracking index")]
     InconsistentState,
+}
+
+#[derive(Debug, Error, PartialEq)]
+pub enum SplitError {
+    // Also note implies that single-event extension is not splittable
+    #[error(
+        "Parent height is out of bounds for splitting the extension. \
+        Note that parent cannot be the last event of the extension"
+    )]
+    HeightOutOfBounds,
+    #[error(
+        "Split occurs at the start of the extension, thus split \
+        parent must be equal to the extension start."
+    )]
+    ParentStartMismatch,
+    #[error(
+        "Split occurs at the end of the extension, thus split \
+        child must be equal to the extension end."
+    )]
+    ChildEndMismatch,
 }
 
 impl PeerIndexEntry {
@@ -110,9 +131,7 @@ impl PeerIndexEntry {
             event::SelfChild::HonestParent(None) => {
                 // It is a "leaf" in terms of forking, so we just add it to the index
                 // Makes the final check and starts updating the state
-                self.fork_index
-                    .push_event(event.clone(), &self_parent)
-                    .map_err(|e| <LookupIndexInconsistency>::from(e))?;
+                self.fork_index.push_event(event.clone(), &self_parent)?;
             }
             event::SelfChild::HonestParent(Some(firstborn)) => {
                 // It is the second self child, so we creating a new fork
@@ -182,7 +201,7 @@ impl PeerIndexEntry {
 
 /// Node that represents a sequence of events without branching/forking
 #[derive(Debug, Clone)]
-pub struct Extension {
+struct Extension {
     first: event::Hash,
     first_height: usize,
     last: event::Hash,
@@ -190,18 +209,41 @@ pub struct Extension {
 }
 
 impl Extension {
+    /// Construct extension consisting of a single event
+    fn from_event(event: event::Hash, height: usize) -> Self {
+        Self {
+            first: event.clone(),
+            first_height: height,
+            last: event,
+            length: 1,
+        }
+    }
+
+    /// Add event to the end of extension.
+    fn push_event(&mut self, event: event::Hash) {
+        self.last = event;
+        self.length += 1;
+    }
+
     /// Split the extension [A, D] into [A, B] and [C, D], where B is `parent` and C is `child`
-    ///
-    /// `None` if `parent_height` is out of bounds of current extension or is the last element
-    /// (so the child will be out of bound).
     fn split(
         self,
         parent: event::Hash,
         parent_height: usize,
         child: event::Hash,
-    ) -> Option<(Self, Self)> {
-        if parent_height < self.first_height || parent_height >= self.first_height + self.length {
-            return None;
+    ) -> Result<(Self, Self), SplitError> {
+        if parent_height < self.first_height || parent_height >= self.first_height + self.length - 1
+        {
+            return Err(SplitError::HeightOutOfBounds);
+        }
+        if parent_height == self.first_height && parent != self.first {
+            return Err(SplitError::ParentStartMismatch);
+        }
+        // `self.first_height < parent_heigth < self.first_height + self.length`
+        // is true from the first condition. These are all integers, so
+        // length is at least 2. It means `length-2` won't panic
+        if parent_height == self.first_height + (self.length - 2) && child != self.last {
+            return Err(SplitError::ChildEndMismatch);
         }
         let first_part_length = parent_height - self.first_height + 1;
         let first_part = Extension {
@@ -219,7 +261,7 @@ impl Extension {
                 .checked_sub(first_part_length)
                 .expect("Incorrect source length or some height"),
         };
-        Some((first_part, second_part))
+        Ok((first_part, second_part))
     }
 }
 
@@ -239,7 +281,7 @@ impl Leaf {
         fork_parent_height: usize,
         firstborn: event::Hash,
         newborn: event::Hash,
-    ) -> Option<(Fork, Leaf, Leaf)> {
+    ) -> Result<(Fork, Leaf, Leaf), SplitError> {
         let (parent_ext, firstborn_ext) =
             self.0
                 .split(fork_parent, fork_parent_height, firstborn.clone())?;
@@ -248,13 +290,8 @@ impl Leaf {
             forks: vec![firstborn, newborn.clone()],
         };
         let firstborn_fork = Leaf(firstborn_ext);
-        let newborn_leaf = Leaf(Extension {
-            first: newborn.clone(),
-            first_height: fork_parent_height + 1,
-            last: newborn,
-            length: 1,
-        });
-        Some((parent_fork, firstborn_fork, newborn_leaf))
+        let newborn_leaf = Leaf(Extension::from_event(newborn, fork_parent_height + 1));
+        Ok((parent_fork, firstborn_fork, newborn_leaf))
     }
 }
 
@@ -278,7 +315,7 @@ impl Fork {
         fork_parent_height: usize,
         firstborn: event::Hash,
         newborn: event::Hash,
-    ) -> Option<(Fork, Fork, Leaf)> {
+    ) -> Result<(Fork, Fork, Leaf), SplitError> {
         let (parent_ext, firstborn_ext) =
             self.events
                 .split(fork_parent, fork_parent_height, firstborn.clone())?;
@@ -290,13 +327,8 @@ impl Fork {
             events: firstborn_ext,
             forks: self.forks,
         };
-        let newborn_leaf = Leaf(Extension {
-            first: newborn.clone(),
-            first_height: fork_parent_height + 1,
-            last: newborn,
-            length: 1,
-        });
-        Some((parent_fork, firstborn_fork, newborn_leaf))
+        let newborn_leaf = Leaf(Extension::from_event(newborn, fork_parent_height + 1));
+        Ok((parent_fork, firstborn_fork, newborn_leaf))
     }
 }
 
@@ -316,15 +348,18 @@ struct ForkIndex {
 
 impl ForkIndex {
     pub fn new(genesis: event::Hash) -> Self {
-        Self {
+        let mut new_index = Self {
             leafs: HashMap::new(),
             leaf_ends: HashMap::new(),
             forks: HashMap::new(),
-            origin: genesis,
-        }
+            origin: genesis.clone(),
+        };
+        new_index.insert_leaf(Leaf(Extension::from_event(genesis, 0)));
+        new_index
     }
 
     /// Add event to the end of a corresponding leaf.
+    #[instrument(level = "trace", skip_all)]
     pub fn push_event(
         &mut self,
         event: event::Hash,
@@ -333,15 +368,18 @@ impl ForkIndex {
         let leaf_start = self
             .leaf_ends
             .get(self_parent)
-            .ok_or(LeafPush::InvalidSelfParent)?;
-        let mut leaf = self
+            .ok_or(LeafPush::InvalidSelfParent)?
+            .clone();
+        let leaf = self
             .leafs
-            .get_mut(leaf_start)
+            .get_mut(&leaf_start)
             .ok_or(LeafPush::InconsistentState)?;
         if &leaf.0.last != self_parent {
             return Err(LeafPush::InconsistentState);
         }
-        leaf.0.last = event;
+        leaf.0.push_event(event.clone());
+        self.leaf_ends.remove(self_parent);
+        self.leaf_ends.insert(event, leaf_start);
         Ok(())
     }
 
@@ -411,6 +449,7 @@ impl ForkIndex {
     ///    \
     ///     H
     /// ```
+    #[instrument(level = "trace", skip_all)]
     pub fn add_new_fork(
         &mut self,
         extension_identifier: &event::Hash,
@@ -422,15 +461,13 @@ impl ForkIndex {
         // Not `remove` because we don't want to arrive at
         // inconsistent state in case of error
         if let Some(fork) = self.forks.get(extension_identifier).cloned() {
-            let (parent_fork, firstborn_fork, newborn_leaf) = fork
-                .clone()
-                .attach_leaf(
-                    forking_parent,
-                    forking_parent_height,
-                    other_self_child,
-                    new_self_child,
-                )
-                .ok_or(LookupIndexInconsistency::InvalidHeight)?;
+            trace!("Found forking extension by ident, creating new fork within it");
+            let (parent_fork, firstborn_fork, newborn_leaf) = fork.clone().attach_leaf(
+                forking_parent,
+                forking_parent_height,
+                other_self_child,
+                new_self_child,
+            )?;
             // Now no errors can happen, so we're safe to remove
             self.forks.remove(extension_identifier);
             self.insert_fork(parent_fork);
@@ -438,14 +475,13 @@ impl ForkIndex {
             self.insert_leaf(newborn_leaf);
             Ok(())
         } else if let Some(leaf) = self.leafs.get(extension_identifier).cloned() {
-            let (parent_fork, firstborn_leaf, newborn_leaf) = leaf
-                .attach_leaf(
-                    forking_parent,
-                    forking_parent_height,
-                    other_self_child,
-                    new_self_child,
-                )
-                .ok_or(LookupIndexInconsistency::InvalidHeight)?;
+            trace!("Found leaf extension by ident, creating new fork within it");
+            let (parent_fork, firstborn_leaf, newborn_leaf) = leaf.attach_leaf(
+                forking_parent,
+                forking_parent_height,
+                other_self_child,
+                new_self_child,
+            )?;
             // Now no errors can happen, so we're safe to remove
             self.remove_leaf(extension_identifier);
             self.insert_fork(parent_fork);
@@ -513,6 +549,7 @@ impl ForkIndex {
     ///    \
     ///     H
     /// ```
+    #[instrument(level = "trace", skip_all)]
     pub fn add_branch_to_fork(
         &mut self,
         previous_fork_identifier: &event::Hash,
@@ -560,5 +597,132 @@ impl<'a> Iterator for ForkIndexIter<'a> {
         } else {
             None
         }
+    }
+}
+
+// Tests became larger than the code, so for easier navigation I've moved them
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hex_literal::hex;
+
+    const TEST_HASH_A: event::Hash = event::Hash::from_array(
+        hex![
+            "1c09ecaba3131425e5f04afb9e6ea029c363cdfbb17a04aff4946847d20bd85be6dbd9529a9b5bea3d63c967645ce28891e9994844fc6e0fdd0468d60fdf0300"
+        ]
+    );
+    const TEST_HASH_B: event::Hash = event::Hash::from_array(
+        hex![
+            "66b4d625d5729f5a36fd918fbbda2cd38f636743708d489f9a35d0a62e7ca319b9db7939fbd129d0e8a3b4e00586acc88439e2bb7f9ba2beada06f1c34a6c065"
+        ]
+    );
+    const TEST_HASH_C: event::Hash = event::Hash::from_array(
+        hex![
+            "65a3247180d90327a35f3662920336feb5e9487630294cdeb08ca25720998633ff95108c950200453ccb2ace1a4c774f4ae4887203900506576b38dd7fe93fd3"
+        ]
+    );
+    const TEST_HASH_D: event::Hash = event::Hash::from_array(
+        hex![
+            "f537c5c9cf69000588d0bb69b835b7f3d062540e981acb82d748eeb102ad2a3b82cc228dba870fd0da5a9e7c5bf2669d3cb852520838599ecb52230ed15be1f4"
+        ]
+    );
+    const TEST_HASH_E: event::Hash = event::Hash::from_array(
+        hex![
+            "f660614747149b2b9d324b503891d923bf96626f7cc8e0a5c2bc90e2803105d68e2710cd986b356626d067ef15b52af4caf29085e3ee8925104c3982020eb991"
+        ]
+    );
+    const TEST_HASH_F: event::Hash = event::Hash::from_array(
+        hex![
+            "45d854c1bb52aa932940c6d80662961301f96f46d7f7fc9b5fc0a17d12d073fdc581dab54ee1e414a562ce354c74b2994935e4a8a843040336122add8e0a7086"
+        ]
+    );
+
+    #[test]
+    fn test_fork_index_constructed() {
+        // Resulting layout; events are added in alphabetical order
+        //   F E
+        //  / /
+        // A-B-C
+        //    \
+        //     D
+
+        // A
+        let mut index = ForkIndex::new(TEST_HASH_A);
+        // B
+        index.push_event(TEST_HASH_B, &TEST_HASH_A).unwrap();
+        // C
+        index.push_event(TEST_HASH_C, &TEST_HASH_B).unwrap();
+        // D
+        index
+            .add_new_fork(&TEST_HASH_A, TEST_HASH_B, 1, TEST_HASH_D, TEST_HASH_C)
+            .unwrap();
+        // E
+        index.add_branch_to_fork(&TEST_HASH_A, TEST_HASH_E).unwrap();
+        // F
+        index
+            .add_new_fork(&TEST_HASH_A, TEST_HASH_A, 0, TEST_HASH_F, TEST_HASH_B)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_fork_index_errors() {
+        // Resulting layout; events are added in alphabetical order
+        //   F E
+        //  / /
+        // A-B-C
+        //    \
+        //     D
+
+        // A
+        let mut index = ForkIndex::new(TEST_HASH_A);
+        // B
+        assert_eq!(
+            index.push_event(TEST_HASH_B, &TEST_HASH_B),
+            Err(LeafPush::InvalidSelfParent)
+        );
+        index.push_event(TEST_HASH_B, &TEST_HASH_A).unwrap();
+        // C
+        index.push_event(TEST_HASH_C, &TEST_HASH_B).unwrap();
+        // D
+        assert_eq!(
+            index.add_new_fork(&TEST_HASH_A, TEST_HASH_B, 2, TEST_HASH_D, TEST_HASH_C),
+            Err(LookupIndexInconsistency::SplitError(
+                SplitError::HeightOutOfBounds
+            ))
+        );
+        assert_eq!(
+            index.add_new_fork(&TEST_HASH_A, TEST_HASH_B, 1, TEST_HASH_D, TEST_HASH_A),
+            Err(LookupIndexInconsistency::SplitError(
+                SplitError::ChildEndMismatch
+            ))
+        );
+        assert_eq!(
+            index.add_new_fork(&TEST_HASH_D, TEST_HASH_B, 1, TEST_HASH_D, TEST_HASH_C),
+            Err(LookupIndexInconsistency::InvalidIdentifier(
+                InvalidForkIdentifier
+            ))
+        );
+        // No need to test `forking_parent` as the index has no way of knowing if it is
+        // correct in this case.
+        // `new_self_child` as well, since it's just a new event.
+        index
+            .add_new_fork(&TEST_HASH_A, TEST_HASH_B, 1, TEST_HASH_D, TEST_HASH_C)
+            .unwrap();
+        // E
+        assert_eq!(
+            index.add_branch_to_fork(&TEST_HASH_B, TEST_HASH_E),
+            Err(InvalidForkIdentifier)
+        );
+        index.add_branch_to_fork(&TEST_HASH_A, TEST_HASH_E).unwrap();
+        // F
+        assert_eq!(
+            index.add_new_fork(&TEST_HASH_A, TEST_HASH_B, 0, TEST_HASH_F, TEST_HASH_B),
+            Err(LookupIndexInconsistency::SplitError(
+                SplitError::ParentStartMismatch
+            ))
+        );
+        index
+            .add_new_fork(&TEST_HASH_A, TEST_HASH_A, 0, TEST_HASH_F, TEST_HASH_B)
+            .unwrap();
     }
 }

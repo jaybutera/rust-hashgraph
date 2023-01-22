@@ -57,7 +57,7 @@ impl Hash {
         return &self.inner;
     }
 
-    pub fn from_array(inner: [u8; 64]) -> Self {
+    pub const fn from_array(inner: [u8; 64]) -> Self {
         return Hash { inner };
     }
 }
