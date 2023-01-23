@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use thiserror::Error;
-use tracing::{instrument, trace};
+use tracing::{instrument, trace, warn};
 
 use super::event;
 
@@ -200,7 +200,7 @@ impl PeerIndexEntry {
 }
 
 /// Node that represents a sequence of events without branching/forking
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct Extension {
     first: event::Hash,
     first_height: usize,
@@ -560,7 +560,9 @@ impl ForkIndex {
             .get_mut(&previous_fork_identifier)
             .ok_or(InvalidForkIdentifier)?;
         // No need to add new `Fork`s
-        parent_fork.forks.push(new_self_child);
+        parent_fork.forks.push(new_self_child.clone());
+        let new_self_child_height = parent_fork.events.first_height + parent_fork.events.length;
+        self.insert_leaf(Leaf(Extension::from_event(new_self_child, new_self_child_height)));
         Ok(())
     }
 
@@ -577,6 +579,15 @@ enum ForkIndexEntry<'a> {
     Leaf(&'a Leaf),
 }
 
+impl<'a> ForkIndexEntry<'a> {
+    fn extension(&self) -> &Extension {
+        match self {
+            ForkIndexEntry::Fork(f) => &f.events,
+            ForkIndexEntry::Leaf(l) => &l.0,
+        }
+    }
+}
+
 struct ForkIndexIter<'a> {
     index: &'a ForkIndex,
     queued_entries: Vec<&'a event::Hash>,
@@ -591,10 +602,13 @@ impl<'a> Iterator for ForkIndexIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let next_entry = self.queued_entries.pop()?;
         if let Some(fork) = self.index.forks.get(next_entry) {
+            let mut new_entries = fork.forks.iter().by_ref().clone().collect();
+            self.queued_entries.append(&mut new_entries);
             Some(ForkIndexEntry::Fork(fork))
         } else if let Some(leaf) = self.index.leafs.get(next_entry) {
             Some(ForkIndexEntry::Leaf(leaf))
         } else {
+            warn!("Couldn't find fork {} in the index, likely the index is malformed", next_entry);
             None
         }
     }
@@ -603,6 +617,8 @@ impl<'a> Iterator for ForkIndexIter<'a> {
 // Tests became larger than the code, so for easier navigation I've moved them
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
     use hex_literal::hex;
 
@@ -636,6 +652,38 @@ mod tests {
             "45d854c1bb52aa932940c6d80662961301f96f46d7f7fc9b5fc0a17d12d073fdc581dab54ee1e414a562ce354c74b2994935e4a8a843040336122add8e0a7086"
         ]
     );
+
+    fn print_entry<F>(e: ForkIndexEntry, name_lookup: F)
+    where
+        F: Fn (&event::Hash) -> String
+    {
+        match e {
+            ForkIndexEntry::Fork(_) => println!("Fork: "),
+            ForkIndexEntry::Leaf(_) => println!("Leaf: "),
+        }
+        let ext = e.extension();
+        print!("events {}(at {})-({} events)->{}; then ", name_lookup(&ext.first), ext.first_height, ext.length, name_lookup(&ext.last));
+        match e {
+            ForkIndexEntry::Fork(f) => {
+                println!("forks to: {:?}", f.forks.iter().map(name_lookup).collect::<Vec<_>>().as_slice());
+            },
+            ForkIndexEntry::Leaf(_) => println!("nothing."),
+        }
+    }
+
+    fn print_fork_index<F>(index: &ForkIndex, name_lookup: F)
+    where
+        F: Fn (&event::Hash) -> String
+    {
+        for (_, fork) in &index.forks {
+            let entry = ForkIndexEntry::Fork(&fork);
+            print_entry(entry, &name_lookup);
+        }
+        for (_, leaf) in &index.leafs {
+            let entry = ForkIndexEntry::Leaf(&leaf);
+            print_entry(entry, &name_lookup);
+        }
+    }
 
     #[test]
     fn test_fork_index_constructed() {
@@ -724,5 +772,149 @@ mod tests {
         index
             .add_new_fork(&TEST_HASH_A, TEST_HASH_A, 0, TEST_HASH_F, TEST_HASH_B)
             .unwrap();
+    }
+
+    #[test]
+    fn test_index_iterates_correctly() {
+        // Resulting layout; events are added in alphabetical order
+        //   F E
+        //  / /
+        // A-B-C
+        //    \
+        //     D
+
+        // We want to make sure we visit all events and don't visit
+        // children before their parents.
+
+        // Let's use these helpers to track it:
+
+        enum ForkIndexEntryOwned {
+            Fork(Fork),
+            Leaf(Leaf),
+        }
+
+        impl ForkIndexEntryOwned {
+            fn extension(&self) -> &Extension {
+                match self {
+                    ForkIndexEntryOwned::Fork(f) => &f.events,
+                    ForkIndexEntryOwned::Leaf(l) => &l.0,
+                }
+            }
+        }
+
+        // key - identifier
+        let mut entries_to_visit = HashMap::from([
+            (
+                TEST_HASH_A,
+                ForkIndexEntryOwned::Fork(Fork {
+                    events: Extension::from_event(TEST_HASH_A, 0),
+                    forks: vec![TEST_HASH_B, TEST_HASH_F],
+                }),
+            ),
+            (
+                TEST_HASH_F,
+                ForkIndexEntryOwned::Leaf(Leaf(Extension::from_event(TEST_HASH_F, 1))),
+            ),
+            (
+                TEST_HASH_B,
+                ForkIndexEntryOwned::Fork(Fork {
+                    events: Extension::from_event(TEST_HASH_B, 1),
+                    forks: vec![TEST_HASH_E, TEST_HASH_C, TEST_HASH_D],
+                }),
+            ),
+            (
+                TEST_HASH_E,
+                ForkIndexEntryOwned::Leaf(Leaf(Extension::from_event(TEST_HASH_E, 2))),
+            ),
+            (
+                TEST_HASH_C,
+                ForkIndexEntryOwned::Leaf(Leaf(Extension::from_event(TEST_HASH_C, 2))),
+            ),
+            (
+                TEST_HASH_D,
+                ForkIndexEntryOwned::Leaf(Leaf(Extension::from_event(TEST_HASH_D, 2))),
+            ),
+        ]);
+        let parent = HashMap::from([
+            (TEST_HASH_B, TEST_HASH_A),
+            (TEST_HASH_F, TEST_HASH_A),
+            (TEST_HASH_C, TEST_HASH_B),
+            (TEST_HASH_D, TEST_HASH_B),
+            (TEST_HASH_E, TEST_HASH_B),
+        ]);
+        let names = HashMap::from([
+            (TEST_HASH_A, "A".to_owned()),
+            (TEST_HASH_B, "B".to_owned()),
+            (TEST_HASH_C, "C".to_owned()),
+            (TEST_HASH_D, "D".to_owned()),
+            (TEST_HASH_E, "E".to_owned()),
+            (TEST_HASH_F, "F".to_owned()),
+        ]);
+
+        // A
+        let mut index = ForkIndex::new(TEST_HASH_A);
+        // println!("\nInserted A; state:");
+        // print_fork_index(&index, |hash| names.get(hash).unwrap().clone());
+        // B
+        index.push_event(TEST_HASH_B, &TEST_HASH_A).unwrap();
+        // println!("\nInserted B; state:");
+        // print_fork_index(&index, |hash| names.get(hash).unwrap().clone());
+        // C
+        index.push_event(TEST_HASH_C, &TEST_HASH_B).unwrap();
+        // println!("\nInserted C; state:");
+        // print_fork_index(&index, |hash| names.get(hash).unwrap().clone());
+        // D
+        index
+            .add_new_fork(&TEST_HASH_A, TEST_HASH_B, 1, TEST_HASH_D, TEST_HASH_C)
+            .unwrap();
+        // println!("\nInserted D; state:");
+        // print_fork_index(&index, |hash| names.get(hash).unwrap().clone());
+        // E
+        index.add_branch_to_fork(&TEST_HASH_A, TEST_HASH_E).unwrap();
+        // println!("\nInserted E; state:");
+        // print_fork_index(&index, |hash| names.get(hash).unwrap().clone());
+        // F
+        index
+            .add_new_fork(&TEST_HASH_A, TEST_HASH_A, 0, TEST_HASH_F, TEST_HASH_B)
+            .unwrap();
+        // println!("\nInserted F; state:");
+        // print_fork_index(&index, |hash| names.get(hash).unwrap().clone());
+
+        fn entries_equal(expected: ForkIndexEntryOwned, got: ForkIndexEntry) -> Result<(), String> {
+            let ext_expected = expected.extension().clone();
+            let ext_got = got.extension().clone();
+            match (expected, got) {
+                (ForkIndexEntryOwned::Fork(_), ForkIndexEntry::Leaf(_))
+                | (ForkIndexEntryOwned::Leaf(_), ForkIndexEntry::Fork(_)) => {
+                    return Err("Types mismatch".to_owned())
+                }
+                (ForkIndexEntryOwned::Fork(expected), ForkIndexEntry::Fork(got)) => {
+                    let forks_expected = HashSet::<_>::from_iter(expected.forks);
+                    let forks_got = HashSet::<_>::from_iter(got.forks.clone());
+                    if forks_expected != forks_got {
+                        return Err("Sets of forks are different".to_owned());
+                    }
+                }
+                (ForkIndexEntryOwned::Leaf(_), ForkIndexEntry::Leaf(_)) => (),
+            };
+            if ext_expected != ext_got {
+                return Err("Extensions are not equal".to_owned());
+            }
+            return Ok(());
+        }
+
+        for entry in index.iter() {
+            let id = &entry.extension().first;
+            if id != &TEST_HASH_A {
+                let parent_id = parent.get(id).unwrap();
+
+                if entries_to_visit.contains_key(parent_id) {
+                    panic!("Visited child before parent ({} before {})", id, parent_id);
+                }
+            }
+            let expected_entry = entries_to_visit.remove(id).unwrap();
+            assert_eq!(Ok(()), entries_equal(expected_entry, entry));
+        }
+        assert!(entries_to_visit.is_empty());
     }
 }
