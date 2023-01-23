@@ -562,7 +562,10 @@ impl ForkIndex {
         // No need to add new `Fork`s
         parent_fork.forks.push(new_self_child.clone());
         let new_self_child_height = parent_fork.events.first_height + parent_fork.events.length;
-        self.insert_leaf(Leaf(Extension::from_event(new_self_child, new_self_child_height)));
+        self.insert_leaf(Leaf(Extension::from_event(
+            new_self_child,
+            new_self_child_height,
+        )));
         Ok(())
     }
 
@@ -608,7 +611,10 @@ impl<'a> Iterator for ForkIndexIter<'a> {
         } else if let Some(leaf) = self.index.leafs.get(next_entry) {
             Some(ForkIndexEntry::Leaf(leaf))
         } else {
-            warn!("Couldn't find fork {} in the index, likely the index is malformed", next_entry);
+            warn!(
+                "Couldn't find fork {} in the index, likely the index is malformed",
+                next_entry
+            );
             None
         }
     }
@@ -655,25 +661,38 @@ mod tests {
 
     fn print_entry<F>(e: ForkIndexEntry, name_lookup: F)
     where
-        F: Fn (&event::Hash) -> String
+        F: Fn(&event::Hash) -> String,
     {
         match e {
             ForkIndexEntry::Fork(_) => println!("Fork: "),
             ForkIndexEntry::Leaf(_) => println!("Leaf: "),
         }
         let ext = e.extension();
-        print!("events {}(at {})-({} events)->{}; then ", name_lookup(&ext.first), ext.first_height, ext.length, name_lookup(&ext.last));
+        print!(
+            "events {}(at {})-({} events)->{}; then ",
+            name_lookup(&ext.first),
+            ext.first_height,
+            ext.length,
+            name_lookup(&ext.last)
+        );
         match e {
             ForkIndexEntry::Fork(f) => {
-                println!("forks to: {:?}", f.forks.iter().map(name_lookup).collect::<Vec<_>>().as_slice());
-            },
+                println!(
+                    "forks to: {:?}",
+                    f.forks
+                        .iter()
+                        .map(name_lookup)
+                        .collect::<Vec<_>>()
+                        .as_slice()
+                );
+            }
             ForkIndexEntry::Leaf(_) => println!("nothing."),
         }
     }
 
     fn print_fork_index<F>(index: &ForkIndex, name_lookup: F)
     where
-        F: Fn (&event::Hash) -> String
+        F: Fn(&event::Hash) -> String,
     {
         for (_, fork) in &index.forks {
             let entry = ForkIndexEntry::Fork(&fork);
@@ -855,24 +874,29 @@ mod tests {
         let mut index = ForkIndex::new(TEST_HASH_A);
         // println!("\nInserted A; state:");
         // print_fork_index(&index, |hash| names.get(hash).unwrap().clone());
+
         // B
         index.push_event(TEST_HASH_B, &TEST_HASH_A).unwrap();
         // println!("\nInserted B; state:");
         // print_fork_index(&index, |hash| names.get(hash).unwrap().clone());
+
         // C
         index.push_event(TEST_HASH_C, &TEST_HASH_B).unwrap();
         // println!("\nInserted C; state:");
         // print_fork_index(&index, |hash| names.get(hash).unwrap().clone());
+
         // D
         index
             .add_new_fork(&TEST_HASH_A, TEST_HASH_B, 1, TEST_HASH_D, TEST_HASH_C)
             .unwrap();
         // println!("\nInserted D; state:");
         // print_fork_index(&index, |hash| names.get(hash).unwrap().clone());
+
         // E
         index.add_branch_to_fork(&TEST_HASH_A, TEST_HASH_E).unwrap();
         // println!("\nInserted E; state:");
         // print_fork_index(&index, |hash| names.get(hash).unwrap().clone());
+
         // F
         index
             .add_new_fork(&TEST_HASH_A, TEST_HASH_A, 0, TEST_HASH_F, TEST_HASH_B)
