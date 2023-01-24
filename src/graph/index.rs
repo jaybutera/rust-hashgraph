@@ -90,7 +90,7 @@ impl PeerIndexEntry {
         let latest_event = genesis.clone();
         Self {
             genesis: genesis.clone(),
-            authored_events: HashMap::new(),
+            authored_events: HashMap::from([(genesis.clone(), 0)]),
             fork_index: ForkIndex::new(genesis),
             latest_event,
         }
@@ -121,7 +121,7 @@ impl PeerIndexEntry {
             .authored_events
             .get(&self_parent)
             .ok_or(Error::UnknownParent)?;
-        // Consider self children without the newly added event
+        // Consider self children without the newly added event (just in case)
         let parent_self_children: event::SelfChild = parent_event
             .children
             .self_child
@@ -623,7 +623,10 @@ impl<'a> Iterator for ForkIndexIter<'a> {
 // Tests became larger than the code, so for easier navigation I've moved them
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use std::{
+        collections::HashSet,
+        time::{Duration, Instant},
+    };
 
     use super::*;
     use hex_literal::hex;
@@ -658,10 +661,22 @@ mod tests {
             "45d854c1bb52aa932940c6d80662961301f96f46d7f7fc9b5fc0a17d12d073fdc581dab54ee1e414a562ce354c74b2994935e4a8a843040336122add8e0a7086"
         ]
     );
+    // For debugging
+    #[allow(unused)]
+    const NAMES: [(event::Hash, &str); 6] = [
+        (TEST_HASH_A, "A"),
+        (TEST_HASH_B, "B"),
+        (TEST_HASH_C, "C"),
+        (TEST_HASH_D, "D"),
+        (TEST_HASH_E, "E"),
+        (TEST_HASH_F, "F"),
+    ];
 
+    // For debugging
+    #[allow(unused)]
     fn print_entry<F>(e: ForkIndexEntry, name_lookup: F)
     where
-        F: Fn(&event::Hash) -> String,
+        F: Fn(&event::Hash) -> &str,
     {
         match e {
             ForkIndexEntry::Fork(_) => println!("Fork: "),
@@ -690,9 +705,11 @@ mod tests {
         }
     }
 
+    // For debugging
+    #[allow(unused)]
     fn print_fork_index<F>(index: &ForkIndex, name_lookup: F)
     where
-        F: Fn(&event::Hash) -> String,
+        F: Fn(&event::Hash) -> &str,
     {
         for (_, fork) in &index.forks {
             let entry = ForkIndexEntry::Fork(&fork);
@@ -705,7 +722,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fork_index_constructed() {
+    fn test_fork_index_constructs() {
         // Resulting layout; events are added in alphabetical order
         //   F E
         //  / /
@@ -732,7 +749,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fork_index_errors() {
+    fn test_fork_index_gives_errors() {
         // Resulting layout; events are added in alphabetical order
         //   F E
         //  / /
@@ -794,7 +811,7 @@ mod tests {
     }
 
     #[test]
-    fn test_index_iterates_correctly() {
+    fn test_fork_index_iterates_correctly() {
         // Resulting layout; events are added in alphabetical order
         //   F E
         //  / /
@@ -861,14 +878,7 @@ mod tests {
             (TEST_HASH_D, TEST_HASH_B),
             (TEST_HASH_E, TEST_HASH_B),
         ]);
-        let names = HashMap::from([
-            (TEST_HASH_A, "A".to_owned()),
-            (TEST_HASH_B, "B".to_owned()),
-            (TEST_HASH_C, "C".to_owned()),
-            (TEST_HASH_D, "D".to_owned()),
-            (TEST_HASH_E, "E".to_owned()),
-            (TEST_HASH_F, "F".to_owned()),
-        ]);
+        // let names = HashMap::from(NAMES);
 
         // A
         let mut index = ForkIndex::new(TEST_HASH_A);
@@ -940,5 +950,141 @@ mod tests {
             assert_eq!(Ok(()), entries_equal(expected_entry, entry));
         }
         assert!(entries_to_visit.is_empty());
+    }
+
+    #[test]
+    fn test_peer_index_constructs() {
+        // Resulting layout; events are added in alphabetical order
+        //   F E
+        //  / /
+        // A-B-C
+        //    \
+        //     D
+
+        let peer = 3u64;
+        let start_time = Duration::from_secs(1674549572);
+        let mut all_events = HashMap::new();
+
+        // Since we work with actual events, we can't use our sample hashes.
+        let event_a =
+            event::Event::new((), event::Kind::Genesis, peer, start_time.as_secs().into()).unwrap();
+        let a_hash = event_a.hash().clone();
+        all_events.insert(a_hash.clone(), event_a);
+        let mut index = PeerIndexEntry::new(a_hash.clone());
+
+        let event_b = event::Event::new(
+            (),
+            event::Kind::Regular(event::Parents {
+                self_parent: a_hash.clone(),
+                // doesn't matter what to put here, we don't test it at all
+                other_parent: a_hash.clone(),
+            }),
+            peer,
+            (start_time + Duration::from_secs(1)).as_secs().into(),
+        )
+        .unwrap();
+        let b_hash = event_b.hash().clone();
+        all_events.insert(b_hash.clone(), event_b);
+        all_events
+            .get_mut(&a_hash)
+            .unwrap()
+            .children
+            .self_child
+            .add_child(b_hash.clone());
+        index
+            .add_event(a_hash.clone(), b_hash.clone(), |h| all_events.get(h))
+            .unwrap();
+
+        let event_c = event::Event::new(
+            (),
+            event::Kind::Regular(event::Parents {
+                self_parent: b_hash.clone(),
+                // doesn't matter what to put here, we don't test it at all
+                other_parent: a_hash.clone(),
+            }),
+            peer,
+            (start_time + Duration::from_secs(3)).as_secs().into(),
+        )
+        .unwrap();
+        let c_hash = event_c.hash().clone();
+        all_events.insert(c_hash.clone(), event_c);
+        all_events
+            .get_mut(&b_hash)
+            .unwrap()
+            .children
+            .self_child
+            .add_child(c_hash.clone());
+        index
+            .add_event(b_hash.clone(), c_hash.clone(), |h| all_events.get(h))
+            .unwrap();
+
+        let event_d = event::Event::new(
+            (),
+            event::Kind::Regular(event::Parents {
+                self_parent: b_hash.clone(),
+                // doesn't matter what to put here, we don't test it at all
+                other_parent: a_hash.clone(),
+            }),
+            peer,
+            (start_time + Duration::from_secs(4)).as_secs().into(),
+        )
+        .unwrap();
+        let d_hash = event_d.hash().clone();
+        all_events.insert(d_hash.clone(), event_d);
+        all_events
+            .get_mut(&b_hash)
+            .unwrap()
+            .children
+            .self_child
+            .add_child(d_hash.clone());
+        index
+            .add_event(b_hash.clone(), d_hash.clone(), |h| all_events.get(h))
+            .unwrap();
+
+        let event_e = event::Event::new(
+            (),
+            event::Kind::Regular(event::Parents {
+                self_parent: b_hash.clone(),
+                // doesn't matter what to put here, we don't test it at all
+                other_parent: a_hash.clone(),
+            }),
+            peer,
+            (start_time + Duration::from_secs(5)).as_secs().into(),
+        )
+        .unwrap();
+        let e_hash = event_e.hash().clone();
+        all_events.insert(e_hash.clone(), event_e);
+        all_events
+            .get_mut(&b_hash)
+            .unwrap()
+            .children
+            .self_child
+            .add_child(e_hash.clone());
+        index
+            .add_event(b_hash.clone(), e_hash.clone(), |h| all_events.get(h))
+            .unwrap();
+
+        let event_f = event::Event::new(
+            (),
+            event::Kind::Regular(event::Parents {
+                self_parent: a_hash.clone(),
+                // doesn't matter what to put here, we don't test it at all
+                other_parent: a_hash.clone(),
+            }),
+            peer,
+            (start_time + Duration::from_secs(6)).as_secs().into(),
+        )
+        .unwrap();
+        let f_hash = event_f.hash().clone();
+        all_events.insert(f_hash.clone(), event_f);
+        all_events
+            .get_mut(&a_hash)
+            .unwrap()
+            .children
+            .self_child
+            .add_child(f_hash.clone());
+        index
+            .add_event(a_hash.clone(), f_hash.clone(), |h| all_events.get(h))
+            .unwrap();
     }
 }

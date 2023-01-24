@@ -67,7 +67,7 @@ pub struct Event<TPayload> {
     // parents are inside `type_specific`, as geneses do not have ones
     pub children: Children,
 
-    // Hash of user payload + parents + author data (blockchain-like)
+    // Hash of user payload + parents + author data + timestamp (blockchain-like)
     // TODO: write why
     id: Hash,
 
@@ -75,7 +75,7 @@ pub struct Event<TPayload> {
     parents: Kind,
     author: PeerId,
     /// Timestamp set by author
-    time_created: Timestamp,
+    timestamp: Timestamp,
 }
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
@@ -160,9 +160,9 @@ impl<TPayload: Serialize> Event<TPayload> {
         payload: TPayload,
         event_kind: Kind,
         author: PeerId,
-        time_created: Timestamp,
+        timestamp: Timestamp,
     ) -> bincode::Result<Self> {
-        let hash = Self::calculate_hash(&payload, &event_kind, &author)?;
+        let hash = Self::calculate_hash(&payload, &event_kind, &author, &timestamp)?;
         Ok(Event {
             children: Children {
                 self_child: SelfChild::HonestParent(None),
@@ -172,7 +172,7 @@ impl<TPayload: Serialize> Event<TPayload> {
             user_payload: payload,
             parents: event_kind,
             author,
-            time_created,
+            timestamp,
         })
     }
 
@@ -180,6 +180,7 @@ impl<TPayload: Serialize> Event<TPayload> {
         payload: &TPayload,
         event_kind: &Kind,
         author: &PeerId,
+        timestamp: &Timestamp,
     ) -> bincode::Result<Vec<u8>> {
         let mut v = vec![];
         let payload_bytes = bincode::serialize(&payload)?;
@@ -188,6 +189,8 @@ impl<TPayload: Serialize> Event<TPayload> {
         v.extend(kind_bytes);
         let author_bytes = bincode::serialize(&author)?;
         v.extend(author_bytes);
+        let timestamp_bytes = bincode::serialize(&timestamp)?;
+        v.extend(timestamp_bytes);
         Ok(v)
     }
 
@@ -195,9 +198,12 @@ impl<TPayload: Serialize> Event<TPayload> {
         payload: &TPayload,
         event_kind: &Kind,
         author: &PeerId,
+        timestamp: &Timestamp,
     ) -> bincode::Result<Hash> {
         let mut hasher = Blake2b512::new();
-        hasher.update(Self::digest_from_parts(payload, event_kind, author)?);
+        hasher.update(Self::digest_from_parts(
+            payload, event_kind, author, timestamp,
+        )?);
         let hash_slice = &hasher.finalize()[..];
         // Should be compiler checkable but the developers of the library
         // didn't use generic constants, which would allow to work with arrays right away
@@ -232,7 +238,7 @@ impl<TPayload> Event<TPayload> {
     }
 
     pub fn timestamp(&self) -> &u128 {
-        &self.time_created
+        &self.timestamp
     }
 }
 
