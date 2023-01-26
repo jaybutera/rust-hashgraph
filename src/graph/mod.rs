@@ -3,7 +3,6 @@ use thiserror::Error;
 
 pub mod datastructure;
 pub mod event;
-mod index;
 
 // u64 must be enough, if new round each 0.1 second
 // then we'll be supplied for >5*10^10 years lol

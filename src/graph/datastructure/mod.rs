@@ -7,13 +7,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use self::ordering::OrderedEvents;
-
+use self::peer_index::{EventIndex, PeerIndexEntry};
 use super::event::{self, Event, Parents};
-use super::index::{EventIndex, PeerIndexEntry};
 use super::{PushError, PushKind, RoundNum};
 use crate::{PeerId, Timestamp};
 
 mod ordering;
+mod peer_index;
 mod sync;
 
 #[derive(Debug, PartialEq, Clone)]

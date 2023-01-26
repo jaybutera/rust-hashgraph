@@ -20,6 +20,7 @@ impl CompressedKnownState {
 }
 
 pub struct CompressedPeerState {
+    origin: event::Hash,
     data: HashMap<event::Hash, CompressedStateEntry>,
 }
 
@@ -45,6 +46,9 @@ enum CompressedStateEntry {
 
 impl CompressedPeerState {
     pub fn generate(source: &PeerIndexEntry) -> Self {
+        // for extension in source.forks() {
+
+        // }
         todo!()
     }
 }
