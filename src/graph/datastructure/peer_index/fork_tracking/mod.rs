@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, num::NonZeroU8};
 
 use thiserror::Error;
 use tracing::{instrument, trace, warn};
@@ -45,6 +45,7 @@ impl Leaf {
         firstborn: event::Hash,
         newborn: event::Hash,
     ) -> Result<(Fork, Leaf, Leaf), SplitError> {
+        let this_submul = self.0.submultiple();
         let (parent_ext, firstborn_ext) =
             self.0
                 .split_at(fork_parent, fork_parent_height, firstborn.clone())?;
@@ -53,7 +54,7 @@ impl Leaf {
             forks: vec![firstborn, newborn.clone()],
         };
         let firstborn_fork = Leaf(firstborn_ext);
-        let newborn_leaf = Leaf(Extension::from_event(newborn, fork_parent_height + 1));
+        let newborn_leaf = Leaf(Extension::from_event_with_submultiple(newborn, fork_parent_height + 1, this_submul).expect("Submultiple was correct before, so it must be here as well"));
         Ok((parent_fork, firstborn_fork, newborn_leaf))
     }
 }
@@ -79,6 +80,7 @@ impl Fork {
         firstborn: event::Hash,
         newborn: event::Hash,
     ) -> Result<(Fork, Fork, Leaf), SplitError> {
+        let this_submul = self.events.submultiple();
         let (parent_ext, firstborn_ext) =
             self.events
                 .split_at(fork_parent, fork_parent_height, firstborn.clone())?;
@@ -90,7 +92,7 @@ impl Fork {
             events: firstborn_ext,
             forks: self.forks,
         };
-        let newborn_leaf = Leaf(Extension::from_event(newborn, fork_parent_height + 1));
+        let newborn_leaf = Leaf(Extension::from_event_with_submultiple(newborn, fork_parent_height + 1, this_submul).expect("Submultiple was correct before, so it must be here as well"));
         Ok((parent_fork, firstborn_fork, newborn_leaf))
     }
 }
@@ -110,14 +112,17 @@ pub struct ForkIndex {
 }
 
 impl ForkIndex {
-    pub fn new(genesis: event::Hash) -> Self {
+    /// Create new fork index with origin event `genesis` and
+    /// `submultiple` - base for multipliers of tracking long
+    /// extensions.
+    pub fn new(genesis: event::Hash, submultiple: NonZeroU8) -> Self {
         let mut new_index = Self {
             leafs: HashMap::new(),
             leaf_ends: HashMap::new(),
             forks: HashMap::new(),
             origin: genesis.clone(),
         };
-        new_index.insert_leaf(Leaf(Extension::from_event(genesis, 0)));
+        new_index.insert_leaf(Leaf(Extension::from_event_with_submultiple(genesis, 0, submultiple.into()).expect("Nonzero static type")));
         new_index
     }
 
@@ -325,10 +330,12 @@ impl ForkIndex {
         // No need to add new `Fork`s
         parent_fork.forks.push(new_self_child.clone());
         let new_self_child_height = parent_fork.events.first_height() + parent_fork.events.length();
-        self.insert_leaf(Leaf(Extension::from_event(
+        let parent_submul = parent_fork.events.submultiple();
+        self.insert_leaf(Leaf(Extension::from_event_with_submultiple(
             new_self_child,
             new_self_child_height,
-        )));
+            parent_submul
+        ).expect("Submultiple was correct before, so it must be here as well")));
         Ok(())
     }
 
@@ -449,7 +456,7 @@ mod tests {
         //     D
 
         // A
-        let mut index = ForkIndex::new(TEST_HASH_A);
+        let mut index = ForkIndex::new(TEST_HASH_A, NonZeroU8::new(3u8).unwrap());
         // B
         index.push_event(TEST_HASH_B, &TEST_HASH_A).unwrap();
         // C
@@ -476,7 +483,7 @@ mod tests {
         //     D
 
         // A
-        let mut index = ForkIndex::new(TEST_HASH_A);
+        let mut index = ForkIndex::new(TEST_HASH_A, NonZeroU8::new(3u8).unwrap());
         // B
         assert_eq!(
             index.push_event(TEST_HASH_B, &TEST_HASH_B),
@@ -561,32 +568,32 @@ mod tests {
             (
                 TEST_HASH_A,
                 ForkIndexEntryOwned::Fork(Fork {
-                    events: Extension::from_event(TEST_HASH_A, 0),
+                    events: Extension::from_event_with_submultiple(TEST_HASH_A, 0, 3u8).expect("nonzero"),
                     forks: vec![TEST_HASH_B, TEST_HASH_F],
                 }),
             ),
             (
                 TEST_HASH_F,
-                ForkIndexEntryOwned::Leaf(Leaf(Extension::from_event(TEST_HASH_F, 1))),
+                ForkIndexEntryOwned::Leaf(Leaf(Extension::from_event_with_submultiple(TEST_HASH_F, 1, 3u8).expect("nonzero"))),
             ),
             (
                 TEST_HASH_B,
                 ForkIndexEntryOwned::Fork(Fork {
-                    events: Extension::from_event(TEST_HASH_B, 1),
+                    events: Extension::from_event_with_submultiple(TEST_HASH_B, 1, 3u8).expect("nonzero"),
                     forks: vec![TEST_HASH_E, TEST_HASH_C, TEST_HASH_D],
                 }),
             ),
             (
                 TEST_HASH_E,
-                ForkIndexEntryOwned::Leaf(Leaf(Extension::from_event(TEST_HASH_E, 2))),
+                ForkIndexEntryOwned::Leaf(Leaf(Extension::from_event_with_submultiple(TEST_HASH_E, 2, 3u8).expect("nonzero"))),
             ),
             (
                 TEST_HASH_C,
-                ForkIndexEntryOwned::Leaf(Leaf(Extension::from_event(TEST_HASH_C, 2))),
+                ForkIndexEntryOwned::Leaf(Leaf(Extension::from_event_with_submultiple(TEST_HASH_C, 2, 3u8).expect("nonzero"))),
             ),
             (
                 TEST_HASH_D,
-                ForkIndexEntryOwned::Leaf(Leaf(Extension::from_event(TEST_HASH_D, 2))),
+                ForkIndexEntryOwned::Leaf(Leaf(Extension::from_event_with_submultiple(TEST_HASH_D, 2, 3u8).expect("nonzero"))),
             ),
         ]);
         let parent = HashMap::from([
@@ -599,7 +606,7 @@ mod tests {
         // let names = HashMap::from(NAMES);
 
         // A
-        let mut index = ForkIndex::new(TEST_HASH_A);
+        let mut index = ForkIndex::new(TEST_HASH_A, NonZeroU8::new(3u8).unwrap());
         // println!("\nInserted A; state:");
         // print_fork_index(&index, |hash| names.get(hash).unwrap().clone());
 

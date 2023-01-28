@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, num::NonZeroU8};
 
 use thiserror::Error;
 
@@ -48,12 +48,12 @@ pub enum Error {
 }
 
 impl PeerIndexEntry {
-    pub fn new(genesis: event::Hash) -> Self {
+    pub fn new(genesis: event::Hash, fork_index_submultiple: NonZeroU8) -> Self {
         let latest_event = genesis.clone();
         Self {
             genesis: genesis.clone(),
             authored_events: HashMap::from([(genesis.clone(), 0)]),
-            fork_index: ForkIndex::new(genesis),
+            fork_index: ForkIndex::new(genesis, fork_index_submultiple),
             latest_event,
         }
     }
@@ -163,6 +163,10 @@ impl PeerIndexEntry {
     pub fn forks<'a>(&'a self) -> ForkIndexIter<'a> {
         self.fork_index.iter()
     }
+
+    pub fn forks_intermediates_submultiplier(&self) -> u8 {
+        self.fork_index.iter().next().expect("At least origin must be present").extension().submultiple()
+    }
 }
 
 #[cfg(test)]
@@ -188,7 +192,7 @@ mod tests {
             event::Event::new((), event::Kind::Genesis, peer, start_time.as_secs().into()).unwrap();
         let a_hash = event_a.hash().clone();
         all_events.insert(a_hash.clone(), event_a);
-        let mut index = PeerIndexEntry::new(a_hash.clone());
+        let mut index = PeerIndexEntry::new(a_hash.clone(), NonZeroU8::new(3u8).unwrap());
 
         let event_b = event::Event::new(
             (),

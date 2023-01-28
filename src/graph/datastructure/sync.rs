@@ -26,26 +26,38 @@ pub struct CompressedPeerState {
 
 /// Helps to roughly figure out how many events are known in a chain (and to send)
 /// without transferring all of the events.
-struct EventsList {
+#[derive(Debug, Clone, PartialEq)]
+struct EventsSection {
     first: event::Hash,
-    /// (index, hash)
-    /// first would have index zero
-    intermediate: (usize, event::Hash),
+    first_height: usize,
     last: event::Hash,
+    length: usize,
+    intermediate_threshold: u32,
+    submultiple: u32,
+    /// `(index, hash)`
+    /// 
+    /// Empty if `length` < `intermediate_threshold`
+    /// 
+    /// if `length` >= `intermediate_threshold`, the first element is the first
+    /// whose height `H` is a multiple of `submultiple` (`S`), the next one is with height
+    /// `H+S`, then `H+2S, H+4S, H+8S, ...` until the end of the section is reached
+    intermediates: Vec<(usize, event::Hash)>,
 }
 
 enum CompressedStateEntry {
     /// Sequence of events with fork at the end (in case of dishonest author)
     Fork {
-        events: EventsList,
+        events: EventsSection,
+        /// First elements of each child
         forks: Vec<event::Hash>,
     },
     /// Just a sequence of events
-    DeadEnd(EventsList),
+    Leaf(EventsSection),
 }
 
 impl CompressedPeerState {
-    pub fn generate(source: &PeerIndexEntry) -> Self {
+    pub fn generate(source: &PeerIndexEntry) -> Result<Self, ()> {
+        // if source.
         // for extension in source.forks() {
 
         // }

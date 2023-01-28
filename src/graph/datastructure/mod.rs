@@ -207,7 +207,7 @@ where
                     return Err(PushError::GenesisAlreadyExists);
                 }
                 debug!("The event is valid, updating state to include it");
-                let new_peer_index = PeerIndexEntry::new(new_event.hash().clone());
+                let new_peer_index = PeerIndexEntry::new(new_event.hash().clone(), std::num::NonZeroU8::new(10u8).unwrap());
                 self.peer_index.insert(author, new_peer_index);
             }
             event::Kind::Regular(parents) => {

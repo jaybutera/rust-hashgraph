@@ -10,20 +10,20 @@ mod multiples {
     use thiserror::Error;
 
     #[derive(Debug, Error, PartialEq)]
-    #[error("The index is not a multiple of specified multiplier")]
+    #[error("The index is not a multiple of specified submultiple")]
     pub struct NotMultiple;
 
     /// Stores items with each nth index (number/height/etc.).
     ///
     /// Intended to store subsequent elements starting not from the
-    /// beginning. For example, for `multiplier` 11 we may want to
+    /// beginning. For example, for `submultiple` 11 we may want to
     /// store elements with indices 33, 44, 55, 66, 77, 88.
     ///
     /// Essentially [BTreeMap] but restricted to numeric indexes
-    /// that are multiples of the multiplier.
+    /// that are multiples of the submultiple.
     #[derive(Debug, Clone, PartialEq)]
     pub struct Multiples<TItem, TIndex = u64, TMul = u32> {
-        multiplier: TMul,
+        submultiple: TMul,
         items: BTreeMap<TIndex, TItem>,
     }
 
@@ -34,19 +34,19 @@ mod multiples {
         <TIndex as std::ops::Rem>::Output: PartialEq + From<u8>,
         TItem: Clone,
     {
-        // `None` if `multiplier` is 0
-        pub fn new(multiplier: TMul) -> Option<Self> {
-            if multiplier == 0.into() {
+        // `None` if `submultiple` is 0
+        pub fn new(submultiple: TMul) -> Option<Self> {
+            if submultiple == 0.into() {
                 return None;
             }
             Some(Self {
-                multiplier,
+                submultiple,
                 items: BTreeMap::new(),
             })
         }
 
         pub fn try_insert(&mut self, index: TIndex, element: &TItem) -> Result<(), NotMultiple> {
-            if index % self.multiplier.into() != 0.into() {
+            if index % self.submultiple.into() != 0.into() {
                 return Err(NotMultiple);
             }
             self.items.insert(index, element.clone());
@@ -57,7 +57,7 @@ mod multiples {
         pub fn split_off(&mut self, index: TIndex) -> Self {
             let new_items = self.items.split_off(&index);
             Self {
-                multiplier: self.multiplier,
+                submultiple: self.submultiple,
                 items: new_items,
             }
         }
@@ -65,6 +65,10 @@ mod multiples {
         /// All entries, in order by their index
         pub fn entries(&self) -> std::collections::btree_map::Iter<TIndex, TItem> {
             self.items.iter()
+        }
+
+        pub fn submultiple(&self) -> TMul {
+            self.submultiple
         }
     }
 }
@@ -96,16 +100,17 @@ pub struct Extension {
     first_height: usize,
     last: event::Hash,
     length: usize,
-    mutltiples: Multiples<event::Hash, usize, u8>,
+    multiples: Multiples<event::Hash, usize, u8>,
 }
 
 impl Extension {
-    fn from_event_with_multiplier(
+    /// Construct extension consisting of a single event.
+    pub fn from_event_with_submultiple(
         event: event::Hash,
         height: usize,
-        multiplier: u8,
+        submultiple: u8,
     ) -> Option<Self> {
-        let mut multiples = Multiples::new(multiplier)?;
+        let mut multiples = Multiples::new(submultiple)?;
         // it knows better whether to insert
         let _ = multiples.try_insert(height, &event);
         Some(Self {
@@ -113,19 +118,18 @@ impl Extension {
             first_height: height,
             last: event,
             length: 1,
-            mutltiples: multiples,
+            multiples,
         })
     }
 
-    /// Construct extension consisting of a single event
-    pub fn from_event(event: event::Hash, height: usize) -> Self {
-        Self::from_event_with_multiplier(event, height, 10).expect("10!=0")
+    pub fn submultiple(&self) -> u8 {
+        self.multiples.submultiple()
     }
     /// Add event to the end of extension.
     pub fn push_event(&mut self, event: event::Hash) {
         // it knows if insert
         let _ = self
-            .mutltiples
+            .multiples
             .try_insert(self.first_height + self.length, &event);
         self.last = event;
         self.length += 1;
@@ -154,13 +158,13 @@ impl Extension {
             return Err(SplitError::ChildEndMismatch);
         }
         let first_part_length = parent_height - self.first_height + 1;
-        let second_multiples = self.mutltiples.split_off(parent_height + 1);
+        let second_multiples = self.multiples.split_off(parent_height + 1);
         let first_part = Extension {
             first: self.first,
             first_height: self.first_height,
             last: parent,
             length: first_part_length,
-            mutltiples: self.mutltiples,
+            multiples: self.multiples,
         };
         let second_part = Extension {
             first: child,
@@ -170,7 +174,7 @@ impl Extension {
                 .length
                 .checked_sub(first_part_length)
                 .expect("Incorrect source length or some height"),
-            mutltiples: second_multiples,
+            multiples: second_multiples,
         };
         Ok((first_part, second_part))
     }
@@ -192,7 +196,7 @@ impl Extension {
     }
 
     pub fn multiples(&self) -> std::collections::btree_map::Iter<usize, event::Hash> {
-        self.mutltiples.entries()
+        self.multiples.entries()
     }
 }
 
@@ -298,7 +302,7 @@ mod tests {
 
     #[test]
     fn extension_constructs() {
-        let mut ext = Extension::from_event_with_multiplier(TEST_HASH_A, 0, 3).unwrap();
+        let mut ext = Extension::from_event_with_submultiple(TEST_HASH_A, 0, 3).unwrap();
         ext.push_event(TEST_HASH_B);
         ext.push_event(TEST_HASH_C);
         ext.push_event(TEST_HASH_D);
@@ -332,7 +336,7 @@ mod tests {
             assert_eq!(ext.length(), &length);
         }
 
-        let mut ext = Extension::from_event_with_multiplier(TEST_HASH_A, 0, 3).unwrap();
+        let mut ext = Extension::from_event_with_submultiple(TEST_HASH_A, 0, 3).unwrap();
         ext.push_event(TEST_HASH_B);
         ext.push_event(TEST_HASH_C);
         ext.push_event(TEST_HASH_D);
@@ -389,12 +393,19 @@ mod tests {
             0,
             4,
         );
-        validate_ext(&ext_after, vec![], &TEST_HASH_E, &TEST_HASH_F, 4, 2);
+        validate_ext(
+            &ext_after,
+            vec![],
+            &TEST_HASH_E,
+            &TEST_HASH_F,
+            4,
+            2,
+        );
     }
 
     #[test]
     fn extension_errors_returned() {
-        let mut ext = Extension::from_event_with_multiplier(TEST_HASH_A, 0, 3).unwrap();
+        let mut ext = Extension::from_event_with_submultiple(TEST_HASH_A, 0, 3).unwrap();
         ext.push_event(TEST_HASH_B);
         ext.push_event(TEST_HASH_C);
         ext.push_event(TEST_HASH_D);
@@ -415,17 +426,8 @@ mod tests {
         // Check state just in case
         check_state(&ext);
 
-        assert_eq!(
-            ext.clone().split_at(TEST_HASH_A, 1, TEST_HASH_C),
-            Err(SplitError::ParentStartMismatch)
-        );
-        assert_eq!(
-            ext.clone().split_at(TEST_HASH_E, 4, TEST_HASH_D),
-            Err(SplitError::ChildEndMismatch)
-        );
-        assert_eq!(
-            ext.clone().split_at(TEST_HASH_E, 4, TEST_HASH_D),
-            Err(SplitError::ChildEndMismatch)
-        );
+        assert_eq!(ext.clone().split_at(TEST_HASH_A, 1, TEST_HASH_C), Err(SplitError::ParentStartMismatch));
+        assert_eq!(ext.clone().split_at(TEST_HASH_E, 4, TEST_HASH_D), Err(SplitError::ChildEndMismatch));
+        assert_eq!(ext.clone().split_at(TEST_HASH_E, 4, TEST_HASH_D), Err(SplitError::ChildEndMismatch));
     }
 }
