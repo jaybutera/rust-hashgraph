@@ -231,6 +231,8 @@ pub mod test_utils {
 
     use crate::graph::event;
 
+    use super::Extension;
+
     pub const TEST_HASH_A: event::Hash = event::Hash::from_array(
         hex![
             "1c09ecaba3131425e5f04afb9e6ea029c363cdfbb17a04aff4946847d20bd85be6dbd9529a9b5bea3d63c967645ce28891e9994844fc6e0fdd0468d60fdf0300"
@@ -271,6 +273,16 @@ pub mod test_utils {
         (TEST_HASH_E, "E"),
         (TEST_HASH_F, "F"),
     ];
+
+    pub fn sample_extension() -> Extension {
+        let mut ext = Extension::from_event_with_submultiple(TEST_HASH_A, 0, 3).unwrap();
+        ext.push_event(TEST_HASH_B);
+        ext.push_event(TEST_HASH_C);
+        ext.push_event(TEST_HASH_D);
+        ext.push_event(TEST_HASH_E);
+        ext.push_event(TEST_HASH_F);
+        ext
+    }
 }
 
 #[cfg(test)]
@@ -327,12 +339,7 @@ mod tests {
 
     #[test]
     fn extension_constructs() {
-        let mut ext = Extension::from_event_with_submultiple(TEST_HASH_A, 0, 3).unwrap();
-        ext.push_event(TEST_HASH_B);
-        ext.push_event(TEST_HASH_C);
-        ext.push_event(TEST_HASH_D);
-        ext.push_event(TEST_HASH_E);
-        ext.push_event(TEST_HASH_F);
+        let ext = sample_extension();
 
         assert_eq!(
             ext.multiples().entries().collect_vec(),
@@ -361,14 +368,7 @@ mod tests {
             assert_eq!(ext.length(), &length);
         }
 
-        let mut ext = Extension::from_event_with_submultiple(TEST_HASH_A, 0, 3).unwrap();
-        ext.push_event(TEST_HASH_B);
-        ext.push_event(TEST_HASH_C);
-        ext.push_event(TEST_HASH_D);
-        ext.push_event(TEST_HASH_E);
-        ext.push_event(TEST_HASH_F);
-        // non mut
-        let ext = ext;
+        let ext = sample_extension();
 
         // split at B-C
         let (ext_before, ext_after) = ext.clone().split_at(TEST_HASH_B, 1, TEST_HASH_C).unwrap();
@@ -423,12 +423,7 @@ mod tests {
 
     #[test]
     fn extension_errors_returned() {
-        let mut ext = Extension::from_event_with_submultiple(TEST_HASH_A, 0, 3).unwrap();
-        ext.push_event(TEST_HASH_B);
-        ext.push_event(TEST_HASH_C);
-        ext.push_event(TEST_HASH_D);
-        ext.push_event(TEST_HASH_E);
-        ext.push_event(TEST_HASH_F);
+        let ext = sample_extension();
 
         fn check_state(ext: &Extension) {
             assert_eq!(

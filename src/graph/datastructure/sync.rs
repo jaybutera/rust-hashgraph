@@ -130,3 +130,13 @@ impl From<&Extension> for EventsSection {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn section_constructs_correctly() {
+        // let Extension
+    }
+}
