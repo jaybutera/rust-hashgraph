@@ -4,6 +4,8 @@ use std::{
     ops::Deref,
 };
 
+use tracing::Level;
+
 use super::*;
 /// Filter for `tracing_subscriber` that passes all messages from the given function.
 /// Should be useful for debugging test cases (actually was at least once).
@@ -305,6 +307,7 @@ fn test_cases<TPayload, TArg, TResult, F, FNameLookup>(
     }
 }
 
+/// See [`add_events_with_timestamps`]
 fn add_events<T, TIter>(
     graph: &mut Graph<T>,
     events: &[(&'static str, &'static str, &'static str)],
@@ -503,7 +506,7 @@ where
         ("b3", "b", "c3"),
         ("c4", "c", "d2"),
         ("a3", "a", "b3"),
-        ("c5", "c", "e2"),
+        ("c5", "c", "e2"), // ???
         ("c6", "c", "a3"),
     ];
     let (peers_events, new_names) =
@@ -736,6 +739,10 @@ where
 
 #[test]
 fn graph_builds() {
+    tracing_subscriber::fmt()
+        // filter spans/events with level TRACE or higher.
+        .with_max_level(Level::TRACE)
+        .init();
     build_graph_from_paper((), 999).unwrap();
     build_graph_some_chain((), 999).unwrap();
     build_graph_detailed_example((), 999).unwrap();

@@ -251,7 +251,7 @@ mod tests {
     use super::*;
 
     fn create_events() -> Result<Vec<Event<i32>>, bincode::Error> {
-        let mock_parents = Parents {
+        let mock_parents_1 = Parents {
             self_parent: Hash {
                 inner: hex!(
                     "021ced8799296ceca557832ab941a50b4a11f83478cf141f51f933f653ab9fbc
@@ -265,12 +265,45 @@ mod tests {
                 ),
             },
         };
+        let mock_parents_2 = Parents {
+            self_parent: Hash {
+                inner: hex!(
+                    "8a64b55fcfa60235edf16cebbfb36364d6481c3c5ec4de987114ed86c8f252c22
+                3fadfa820edd589d9c723f032fdf6c9ca95f2fd95c4ffc01808812d8c1bafea"
+                ),
+            },
+            other_parent: Hash {
+                inner: hex!(
+                    "c3ea7982719e7197c63842e41427f358a747e96c7a849b28604569ea101b0bdc5
+                6cba63e4a60b95cb29bce01c2e7e3f918d60fa35aa90586770dfc699da0361a"
+                ),
+            },
+        };
         let results = vec![
             Event::new(0, Kind::Genesis, 0, 0)?,
             Event::new(0, Kind::Genesis, 1, 0)?,
-            Event::new(0, Kind::Regular(mock_parents.clone()), 0, 0)?,
+            Event::new(0, Kind::Regular(mock_parents_1.clone()), 0, 0)?,
+            Event::new(0, Kind::Regular(mock_parents_2.clone()), 0, 0)?,
+            Event::new(
+                0,
+                Kind::Regular(Parents {
+                    self_parent: mock_parents_1.self_parent.clone(),
+                    other_parent: mock_parents_2.other_parent.clone(),
+                }),
+                0,
+                0,
+            )?,
+            Event::new(
+                0,
+                Kind::Regular(Parents {
+                    self_parent: mock_parents_2.self_parent.clone(),
+                    other_parent: mock_parents_1.other_parent.clone(),
+                }),
+                0,
+                0,
+            )?,
             Event::new(1234567, Kind::Genesis, 0, 0)?,
-            Event::new(1234567, Kind::Regular(mock_parents.clone()), 0, 1)?,
+            Event::new(1234567, Kind::Regular(mock_parents_1.clone()), 0, 1)?,
         ];
         Ok(results)
     }

@@ -440,7 +440,7 @@ mod tests {
         check_state(&ext);
 
         assert_eq!(
-            ext.clone().split_at(TEST_HASH_A, 1, TEST_HASH_C),
+            ext.clone().split_at(TEST_HASH_B, 0, TEST_HASH_C),
             Err(SplitError::ParentStartMismatch)
         );
         assert_eq!(

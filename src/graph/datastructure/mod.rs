@@ -166,7 +166,8 @@ where
 
     /// Create and push event to the graph, adding it at the end of `author`'s lane
     /// (i.e. the event becomes the latest one of the peer).
-    #[instrument(level = "error", skip(self, payload))]
+    #[instrument(level = "error", skip_all)]
+    #[instrument(level = "trace", skip(self, payload))]
     pub fn push_event(
         &mut self,
         payload: TPayload,
@@ -193,6 +194,7 @@ where
                 time_created,
             )?,
         };
+        trace!("Event hash: {}", new_event.hash());
 
         trace!("Testing if event is already known");
         if self.all_events.contains_key(new_event.hash()) {
@@ -308,6 +310,7 @@ where
             .determine_witness(&hash)
             .expect("Just inserted to `all_events`")
         {
+            debug!("Event is a witness, performing additional checks");
             trace!("Adding event to witness index");
             self.witnesses
                 .insert(hash.clone(), WitnessFamousness::Undecided);
@@ -316,7 +319,7 @@ where
             trace!("Updating fame and adding events to ordering");
             self.handle_ordering();
         } else {
-            trace!("Event is not a witness");
+            debug!("Event is not a witness");
         }
         Ok(hash)
     }
@@ -385,7 +388,7 @@ where
         let mut progress_made = false;
         let next_round_to_decide = self.last_known_decided_round.map(|a| a + 1).unwrap_or(0);
         debug!(
-            "Starting from round {}. It is a next round after ones known to be decided",
+            "Starting from round {}, the previous one is known to be decided",
             next_round_to_decide
         );
         for checked_round in next_round_to_decide..self.round_index.len() {
@@ -397,8 +400,8 @@ where
                 match self.is_famous_witness(event_hash) {
                     Ok(WitnessFamousness::Undecided) => {
                         debug!(
-                            "Event {} is not decided, so {}-1 is the next one to be decided",
-                            event_hash, checked_round
+                            "Some witness of round {} is not decided, so {} is the next to be decided",
+                            checked_round, self.last_known_decided_round.map(|a| a + 1).unwrap_or(0)
                         );
                         return progress_made;
                     }
