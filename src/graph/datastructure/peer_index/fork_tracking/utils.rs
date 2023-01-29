@@ -71,6 +71,31 @@ mod multiples {
             self.submultiple
         }
     }
+
+    impl<TItem, TMul> Multiples<TItem, usize, TMul>
+    where
+        TMul: Into<usize> + Copy,
+        TItem: Clone,
+    {
+        /// Returns `i`th multiple of `submultiple` starting from the first tracked
+        /// (`i` starts at 0).
+        /// Also returns its height, so the pair is `(height, event_hash)`
+        ///
+        /// If no such value, returns `None`
+        ///
+        /// # Example
+        /// If `submultiple=10` and the first known multiple is 20, then
+        /// `get(0)` will yield to `20`, and `get(3) = 50`.
+        pub fn get(&self, i: usize) -> Option<(usize, TItem)> {
+            // It must already be a multiple of `submultiple` since
+            // we don't add items here if they're not
+            let first_height = self.items.first_key_value()?.0;
+            let i_height = first_height.saturating_add(i.saturating_mul(self.submultiple.into()));
+            self.items
+                .get_key_value(&i_height)
+                .map(|(index, item)| (index.clone(), item.clone()))
+        }
+    }
 }
 
 #[derive(Debug, Error, PartialEq)]
@@ -120,10 +145,6 @@ impl Extension {
             length: 1,
             multiples,
         })
-    }
-
-    pub fn submultiple(&self) -> u8 {
-        self.multiples.submultiple()
     }
     /// Add event to the end of extension.
     pub fn push_event(&mut self, event: event::Hash) {
@@ -195,8 +216,12 @@ impl Extension {
         &self.length
     }
 
-    pub fn multiples(&self) -> std::collections::btree_map::Iter<usize, event::Hash> {
-        self.multiples.entries()
+    pub fn multiples(&self) -> &Multiples<event::Hash, usize, u8> {
+        &self.multiples
+    }
+
+    pub fn submultiple(&self) -> u8 {
+        self.multiples.submultiple()
     }
 }
 
@@ -310,7 +335,7 @@ mod tests {
         ext.push_event(TEST_HASH_F);
 
         assert_eq!(
-            ext.multiples().collect_vec(),
+            ext.multiples().entries().collect_vec(),
             vec![(&0, &TEST_HASH_A), (&3, &TEST_HASH_D),]
         );
         assert_eq!(ext.first_event(), &TEST_HASH_A);
@@ -329,7 +354,7 @@ mod tests {
             first_height: usize,
             length: usize,
         ) {
-            assert_eq!(ext.multiples().collect_vec(), multiples_entries);
+            assert_eq!(ext.multiples().entries().collect_vec(), multiples_entries);
             assert_eq!(ext.first_event(), first);
             assert_eq!(ext.last_event(), last);
             assert_eq!(ext.first_height(), &first_height);
@@ -393,14 +418,7 @@ mod tests {
             0,
             4,
         );
-        validate_ext(
-            &ext_after,
-            vec![],
-            &TEST_HASH_E,
-            &TEST_HASH_F,
-            4,
-            2,
-        );
+        validate_ext(&ext_after, vec![], &TEST_HASH_E, &TEST_HASH_F, 4, 2);
     }
 
     #[test]
@@ -414,7 +432,7 @@ mod tests {
 
         fn check_state(ext: &Extension) {
             assert_eq!(
-                ext.multiples().collect_vec(),
+                ext.multiples().entries().collect_vec(),
                 vec![(&0, &TEST_HASH_A), (&3, &TEST_HASH_D),]
             );
             assert_eq!(ext.first_event(), &TEST_HASH_A);
@@ -426,8 +444,17 @@ mod tests {
         // Check state just in case
         check_state(&ext);
 
-        assert_eq!(ext.clone().split_at(TEST_HASH_A, 1, TEST_HASH_C), Err(SplitError::ParentStartMismatch));
-        assert_eq!(ext.clone().split_at(TEST_HASH_E, 4, TEST_HASH_D), Err(SplitError::ChildEndMismatch));
-        assert_eq!(ext.clone().split_at(TEST_HASH_E, 4, TEST_HASH_D), Err(SplitError::ChildEndMismatch));
+        assert_eq!(
+            ext.clone().split_at(TEST_HASH_A, 1, TEST_HASH_C),
+            Err(SplitError::ParentStartMismatch)
+        );
+        assert_eq!(
+            ext.clone().split_at(TEST_HASH_E, 4, TEST_HASH_D),
+            Err(SplitError::ChildEndMismatch)
+        );
+        assert_eq!(
+            ext.clone().split_at(TEST_HASH_E, 4, TEST_HASH_D),
+            Err(SplitError::ChildEndMismatch)
+        );
     }
 }

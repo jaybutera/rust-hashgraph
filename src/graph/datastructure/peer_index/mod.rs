@@ -5,12 +5,12 @@ use thiserror::Error;
 use self::fork_tracking::{ForkIndex, ForkIndexIter, LeafPush, LookupIndexInconsistency};
 use super::event;
 
-mod fork_tracking;
+pub mod fork_tracking;
 
 pub type EventIndex<TIndexPayload> = HashMap<event::Hash, TIndexPayload>;
 
 pub struct PeerIndexEntry {
-    genesis: event::Hash,
+    origin: event::Hash,
     /// Use `add_latest` for insertion.
     ///
     /// Value is height of the event from genesis if considering self parent/self
@@ -51,7 +51,7 @@ impl PeerIndexEntry {
     pub fn new(genesis: event::Hash, fork_index_submultiple: NonZeroU8) -> Self {
         let latest_event = genesis.clone();
         Self {
-            genesis: genesis.clone(),
+            origin: genesis.clone(),
             authored_events: HashMap::from([(genesis.clone(), 0)]),
             fork_index: ForkIndex::new(genesis, fork_index_submultiple),
             latest_event,
@@ -156,16 +156,16 @@ impl PeerIndexEntry {
         &self.latest_event
     }
 
-    pub fn genesis(&self) -> &event::Hash {
-        &self.genesis
+    pub fn origin(&self) -> &event::Hash {
+        &self.origin
     }
 
     pub fn forks<'a>(&'a self) -> ForkIndexIter<'a> {
         self.fork_index.iter()
     }
 
-    pub fn forks_intermediates_submultiplier(&self) -> u8 {
-        self.fork_index.iter().next().expect("At least origin must be present").extension().submultiple()
+    pub fn forks_submultiple(&self) -> NonZeroU8 {
+        self.fork_index.submultiple()
     }
 }
 

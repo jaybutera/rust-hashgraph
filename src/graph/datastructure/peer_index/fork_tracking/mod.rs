@@ -3,7 +3,8 @@ use std::{collections::HashMap, num::NonZeroU8};
 use thiserror::Error;
 use tracing::{instrument, trace, warn};
 
-use self::utils::{Extension, SplitError};
+pub use self::utils::Extension;
+use self::utils::SplitError;
 use crate::graph::event;
 
 mod utils;
@@ -30,7 +31,7 @@ pub enum LeafPush {
 
 /// Sequence of events without any forks at the end
 #[derive(Debug, Clone)]
-pub struct Leaf(pub Extension);
+pub struct Leaf(Extension);
 
 impl Leaf {
     /// Insert a new leaf within this leaf, creating new fork.
@@ -38,7 +39,7 @@ impl Leaf {
     /// Returns `(parent_fork, first_child_leaf, new_child_leaf)` and
     /// `None` if `fork_parent_height` is incorrect (the parent or its child
     /// are out of bounds)
-    pub fn attach_leaf(
+    fn attach_leaf(
         self,
         fork_parent: event::Hash,
         fork_parent_height: usize,
@@ -54,7 +55,10 @@ impl Leaf {
             forks: vec![firstborn, newborn.clone()],
         };
         let firstborn_fork = Leaf(firstborn_ext);
-        let newborn_leaf = Leaf(Extension::from_event_with_submultiple(newborn, fork_parent_height + 1, this_submul).expect("Submultiple was correct before, so it must be here as well"));
+        let newborn_leaf = Leaf(
+            Extension::from_event_with_submultiple(newborn, fork_parent_height + 1, this_submul)
+                .expect("Submultiple was correct before, so it must be here as well"),
+        );
         Ok((parent_fork, firstborn_fork, newborn_leaf))
     }
 }
@@ -92,8 +96,15 @@ impl Fork {
             events: firstborn_ext,
             forks: self.forks,
         };
-        let newborn_leaf = Leaf(Extension::from_event_with_submultiple(newborn, fork_parent_height + 1, this_submul).expect("Submultiple was correct before, so it must be here as well"));
+        let newborn_leaf = Leaf(
+            Extension::from_event_with_submultiple(newborn, fork_parent_height + 1, this_submul)
+                .expect("Submultiple was correct before, so it must be here as well"),
+        );
         Ok((parent_fork, firstborn_fork, newborn_leaf))
+    }
+
+    pub fn subsequent_forks(&self) -> &Vec<event::Hash> {
+        &self.forks
     }
 }
 
@@ -101,14 +112,16 @@ impl Fork {
 /// relation. Since by definition an event can only have a single self parent,
 /// we can represent it as tree.
 pub struct ForkIndex {
-    // Sections of the peer graph that do not end with a fork. Indexed by their
-    // first/starting element
+    /// Sections of the peer graph that do not end with a fork. Indexed by their
+    /// first/starting element
     leafs: HashMap<event::Hash, Leaf>,
-    // Index of the first element of a leaf by the last/ending element (for convenient
-    // push)
+    /// Index of the first element of a leaf by the last/ending element (for convenient
+    /// push)
     leaf_ends: HashMap<event::Hash, event::Hash>,
     forks: HashMap<event::Hash, Fork>,
     origin: event::Hash,
+    /// Submultiple for tracking intermediate events in [`Extension`]s
+    submultiple: NonZeroU8,
 }
 
 impl ForkIndex {
@@ -121,8 +134,12 @@ impl ForkIndex {
             leaf_ends: HashMap::new(),
             forks: HashMap::new(),
             origin: genesis.clone(),
+            submultiple,
         };
-        new_index.insert_leaf(Leaf(Extension::from_event_with_submultiple(genesis, 0, submultiple.into()).expect("Nonzero static type")));
+        new_index.insert_leaf(Leaf(
+            Extension::from_event_with_submultiple(genesis, 0, submultiple.into())
+                .expect("Nonzero static type"),
+        ));
         new_index
     }
 
@@ -331,12 +348,21 @@ impl ForkIndex {
         parent_fork.forks.push(new_self_child.clone());
         let new_self_child_height = parent_fork.events.first_height() + parent_fork.events.length();
         let parent_submul = parent_fork.events.submultiple();
-        self.insert_leaf(Leaf(Extension::from_event_with_submultiple(
-            new_self_child,
-            new_self_child_height,
-            parent_submul
-        ).expect("Submultiple was correct before, so it must be here as well")));
+        self.insert_leaf(Leaf(
+            Extension::from_event_with_submultiple(
+                new_self_child,
+                new_self_child_height,
+                parent_submul,
+            )
+            .expect("Submultiple was correct before, so it must be here as well"),
+        ));
         Ok(())
+    }
+
+    pub fn submultiple(&self) -> NonZeroU8 {
+        // Should be consistent with actual submultiples inside since they're propagated
+        // on creation without changes
+        self.submultiple
     }
 
     pub fn iter(&self) -> ForkIndexIter {
@@ -568,32 +594,42 @@ mod tests {
             (
                 TEST_HASH_A,
                 ForkIndexEntryOwned::Fork(Fork {
-                    events: Extension::from_event_with_submultiple(TEST_HASH_A, 0, 3u8).expect("nonzero"),
+                    events: Extension::from_event_with_submultiple(TEST_HASH_A, 0, 3u8)
+                        .expect("nonzero"),
                     forks: vec![TEST_HASH_B, TEST_HASH_F],
                 }),
             ),
             (
                 TEST_HASH_F,
-                ForkIndexEntryOwned::Leaf(Leaf(Extension::from_event_with_submultiple(TEST_HASH_F, 1, 3u8).expect("nonzero"))),
+                ForkIndexEntryOwned::Leaf(Leaf(
+                    Extension::from_event_with_submultiple(TEST_HASH_F, 1, 3u8).expect("nonzero"),
+                )),
             ),
             (
                 TEST_HASH_B,
                 ForkIndexEntryOwned::Fork(Fork {
-                    events: Extension::from_event_with_submultiple(TEST_HASH_B, 1, 3u8).expect("nonzero"),
+                    events: Extension::from_event_with_submultiple(TEST_HASH_B, 1, 3u8)
+                        .expect("nonzero"),
                     forks: vec![TEST_HASH_E, TEST_HASH_C, TEST_HASH_D],
                 }),
             ),
             (
                 TEST_HASH_E,
-                ForkIndexEntryOwned::Leaf(Leaf(Extension::from_event_with_submultiple(TEST_HASH_E, 2, 3u8).expect("nonzero"))),
+                ForkIndexEntryOwned::Leaf(Leaf(
+                    Extension::from_event_with_submultiple(TEST_HASH_E, 2, 3u8).expect("nonzero"),
+                )),
             ),
             (
                 TEST_HASH_C,
-                ForkIndexEntryOwned::Leaf(Leaf(Extension::from_event_with_submultiple(TEST_HASH_C, 2, 3u8).expect("nonzero"))),
+                ForkIndexEntryOwned::Leaf(Leaf(
+                    Extension::from_event_with_submultiple(TEST_HASH_C, 2, 3u8).expect("nonzero"),
+                )),
             ),
             (
                 TEST_HASH_D,
-                ForkIndexEntryOwned::Leaf(Leaf(Extension::from_event_with_submultiple(TEST_HASH_D, 2, 3u8).expect("nonzero"))),
+                ForkIndexEntryOwned::Leaf(Leaf(
+                    Extension::from_event_with_submultiple(TEST_HASH_D, 2, 3u8).expect("nonzero"),
+                )),
             ),
         ]);
         let parent = HashMap::from([

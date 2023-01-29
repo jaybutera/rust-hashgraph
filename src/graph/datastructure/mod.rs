@@ -207,7 +207,10 @@ where
                     return Err(PushError::GenesisAlreadyExists);
                 }
                 debug!("The event is valid, updating state to include it");
-                let new_peer_index = PeerIndexEntry::new(new_event.hash().clone(), std::num::NonZeroU8::new(10u8).unwrap());
+                let new_peer_index = PeerIndexEntry::new(
+                    new_event.hash().clone(),
+                    std::num::NonZeroU8::new(10u8).unwrap(),
+                );
                 self.peer_index.insert(author, new_peer_index);
             }
             event::Kind::Regular(parents) => {
@@ -589,7 +592,7 @@ impl<TPayload> Graph<TPayload> {
     }
 
     pub fn peer_genesis(&self, peer: &PeerId) -> Option<&event::Hash> {
-        self.peer_index.get(peer).map(|e| e.genesis())
+        self.peer_index.get(peer).map(|e| e.origin())
     }
 
     pub fn event(&self, id: &event::Hash) -> Option<&event::Event<TPayload>> {
