@@ -211,7 +211,7 @@ impl ForkIndex {
     /// ```
     ///
     /// We use this procedure this way (assuming A has height 0 and thus C - 2)
-    /// ```no_run
+    /// ```rust,ignore
     /// add_new_fork(
     ///     previous_fork_identifier: "C",
     ///     forking_parent: "D",
@@ -307,7 +307,7 @@ impl ForkIndex {
     ///
     /// We use this procedure to add new forks after events B or E by calling
     /// #### B
-    /// ```no_run
+    /// ```rust,ignore
     /// add_branch_to_fork("A", "I")
     /// ```
     /// result:
@@ -321,7 +321,7 @@ impl ForkIndex {
     ///     H
     /// ```
     /// #### E
-    /// ```no_run
+    /// ```rust,ignore
     /// add_branch_to_fork("C", "I")
     /// ```
     /// result:
