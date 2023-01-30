@@ -371,6 +371,10 @@ impl ForkIndex {
             queued_entries: vec![&self.origin],
         }
     }
+
+    pub fn leaf_events(&self) -> Vec<&event::Hash> {
+        self.leaf_ends.keys().collect()
+    }
 }
 
 pub enum ForkIndexEntry<'a> {

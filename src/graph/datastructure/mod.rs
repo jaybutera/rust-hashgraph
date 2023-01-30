@@ -528,7 +528,7 @@ where
             let mut extension = vec![];
             for (peer_id, index) in &self.peer_index {
                 if !peers_hit.contains(&peer_id) {
-                    extension.push(index.latest_event());
+                    extension.push(index.latest_events()[0]);
                 }
             }
             trace!(
@@ -591,7 +591,7 @@ impl<TPayload> Graph<TPayload> {
     }
 
     pub fn peer_latest_event(&self, peer: &PeerId) -> Option<&event::Hash> {
-        self.peer_index.get(peer).map(|e| e.latest_event())
+        self.peer_index.get(peer).map(|e| e.latest_events()[0])
     }
 
     pub fn peer_genesis(&self, peer: &PeerId) -> Option<&event::Hash> {

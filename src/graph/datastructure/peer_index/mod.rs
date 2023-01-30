@@ -24,8 +24,6 @@ pub struct PeerIndexEntry {
     /// Represented by event hashes that have multiple self children
     /// (children authored by the same peer)
     fork_index: ForkIndex,
-    /// Genesis at start
-    latest_event: event::Hash,
 }
 
 #[derive(Debug, Error, PartialEq)]
@@ -49,12 +47,10 @@ pub enum Error {
 
 impl PeerIndexEntry {
     pub fn new(genesis: event::Hash, fork_index_submultiple: NonZeroU8) -> Self {
-        let latest_event = genesis.clone();
         Self {
             origin: genesis.clone(),
             authored_events: HashMap::from([(genesis.clone(), 0)]),
             fork_index: ForkIndex::new(genesis, fork_index_submultiple),
-            latest_event,
         }
     }
 
@@ -152,8 +148,10 @@ impl PeerIndexEntry {
         Ok(prev_event.hash().clone())
     }
 
-    pub fn latest_event(&self) -> &event::Hash {
-        &self.latest_event
+    /// Latest events across all known forks of the peer.
+    /// If peer is honest, it will contain a single event
+    pub fn latest_events(&self) -> Vec<&event::Hash> {
+        self.fork_index.leaf_events()
     }
 
     pub fn origin(&self) -> &event::Hash {
