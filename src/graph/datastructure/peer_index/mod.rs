@@ -2,12 +2,16 @@ use std::{collections::HashMap, num::NonZeroU8};
 
 use thiserror::Error;
 
+use crate::PeerId;
+
 use self::fork_tracking::{ForkIndex, ForkIndexIter, LeafPush, LookupIndexInconsistency};
 use super::event;
 
 pub mod fork_tracking;
 
 pub type EventIndex<TIndexPayload> = HashMap<event::Hash, TIndexPayload>;
+
+pub type PeerIndex = HashMap<PeerId, PeerIndexEntry>;
 
 pub struct PeerIndexEntry {
     origin: event::Hash,

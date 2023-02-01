@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use self::ordering::OrderedEvents;
-use self::peer_index::{EventIndex, PeerIndexEntry};
+use self::peer_index::{EventIndex, PeerIndexEntry, PeerIndex};
 use super::event::{self, Event, Parents};
 use super::{PushError, PushKind, RoundNum};
 use crate::{PeerId, Timestamp};
@@ -104,8 +104,6 @@ enum OrderedEventsError {
     #[error("Given round is undecided")]
     UndecidedRound,
 }
-
-pub type PeerIndex = HashMap<PeerId, PeerIndexEntry>;
 
 pub struct Graph<TPayload> {
     all_events: EventIndex<Event<TPayload>>,
@@ -333,12 +331,18 @@ where
     }
 }
 
-impl<TPayload> Graph<TPayload>
-// where
-//     TPayload: Serialize + Eq + std::hash::Hash,
-{
-    pub fn graph_known_state(&self) -> sync::CompressedKnownState {
-        todo!();
+impl<TPayload> Graph<TPayload> {
+    pub fn graph_known_state(
+        &self,
+    ) -> Result<sync::out::CompressedKnownState, sync::out::SubmultiplierMismatch> {
+        let res = sync::out::CompressedKnownState::try_from(&self.peer_index);
+        match &res {
+            Ok(_state) => debug!("Successfully constructed compressed graph state"),
+            Err(sync::out::SubmultiplierMismatch) => error!(
+                "Fork index is inconsistent (submultipliers vary). Very strange, should not happen"
+            ),
+        };
+        res
     }
 }
 

@@ -5,8 +5,7 @@ use thiserror::Error;
 
 use crate::{graph::event, PeerId};
 
-use super::peer_index::fork_tracking::{Extension, ForkIndexEntry};
-use super::{PeerIndex, PeerIndexEntry};
+use crate::graph::datastructure::peer_index::{fork_tracking::{Extension, ForkIndexEntry}, PeerIndex, PeerIndexEntry};
 
 #[derive(Debug, Error, PartialEq)]
 #[error("Submultipliers within fork index differ")]
@@ -212,11 +211,11 @@ mod tests {
     #[test]
     fn peer_state_constructs_correctly() {
         // Let's do something like
-        //      1-2-3-4-5-6-7-8-9-10-11-12-13-14-15
-        //     /
-        //  0-*
-        //     \
-        //      16
+        //    1-2-3-4-5-6-7-8-9-10-11-12-13-14-15
+        //   /
+        //  0
+        //   \
+        //    16
 
         // arbitrary values
         let peer = 3u64;
@@ -282,12 +281,15 @@ mod tests {
         else {
             panic!("no forks were inserted yet");
         };
-        assert_eq!(ext.intermediates(), &vec![
-            tracked_events[0].clone(),
-            tracked_events[1].clone(),
-            tracked_events[2].clone(),
-            tracked_events[4].clone()
-        ]);
+        assert_eq!(
+            ext.intermediates(),
+            &vec![
+                tracked_events[0].clone(),
+                tracked_events[1].clone(),
+                tracked_events[2].clone(),
+                tracked_events[4].clone()
+            ]
+        );
 
         // the last 16'th event
 
@@ -379,11 +381,14 @@ mod tests {
         else {
             panic!("no more forks on the branch");
         };
-        assert_eq!(&ext.intermediates()[..], &vec![
-            tracked_events[1].clone(),
-            tracked_events[2].clone(),
-            tracked_events[3].clone(),
-            tracked_events[5].clone()
-        ]);
+        assert_eq!(
+            &ext.intermediates()[..],
+            &vec![
+                tracked_events[1].clone(),
+                tracked_events[2].clone(),
+                tracked_events[3].clone(),
+                tracked_events[5].clone()
+            ]
+        );
     }
 }
