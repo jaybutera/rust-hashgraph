@@ -7,6 +7,9 @@ pub use self::utils::Extension;
 use self::utils::SplitError;
 use crate::graph::event;
 
+#[cfg(test)]
+pub use self::utils::test_utils;
+
 mod utils;
 
 #[derive(Debug, Error, PartialEq)]
