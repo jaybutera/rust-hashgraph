@@ -331,14 +331,16 @@ where
     }
 }
 
+// Synchronization-related stuff
+
 impl<TPayload> Graph<TPayload> {
     pub fn graph_known_state(
         &self,
-    ) -> Result<sync::out::CompressedKnownState, sync::out::SubmultiplierMismatch> {
-        let res = sync::out::CompressedKnownState::try_from(&self.peer_index);
+    ) -> Result<sync::outward::CompressedKnownState, sync::outward::SubmultiplierMismatch> {
+        let res = sync::outward::CompressedKnownState::try_from(&self.peer_index);
         match &res {
             Ok(_state) => debug!("Successfully constructed compressed graph state"),
-            Err(sync::out::SubmultiplierMismatch) => error!(
+            Err(sync::outward::SubmultiplierMismatch) => error!(
                 "Fork index is inconsistent (submultipliers vary). Very strange, should not happen"
             ),
         };
@@ -590,18 +592,21 @@ where
 }
 
 impl<TPayload> Graph<TPayload> {
-    pub fn members_count(&self) -> usize {
+    fn members_count(&self) -> usize {
         self.peer_index.keys().len()
     }
 
+    // for navigating the graph state externally
     pub fn peer_latest_event(&self, peer: &PeerId) -> Option<&event::Hash> {
-        self.peer_index.get(peer).map(|e| e.latest_events()[0])
+        self.peer_index.get(peer).map(|e| *e.latest_events().get(0).expect("At least genesis is present"))
     }
 
+    // for navigating the graph state externally
     pub fn peer_genesis(&self, peer: &PeerId) -> Option<&event::Hash> {
         self.peer_index.get(peer).map(|e| e.origin())
     }
 
+    // for navigating the graph state externally
     pub fn event(&self, id: &event::Hash) -> Option<&event::Event<TPayload>> {
         self.all_events.get(id)
     }
@@ -732,7 +737,7 @@ impl<TPayload> Graph<TPayload> {
 
 impl<TPayload> Graph<TPayload> {
     // TODO: probably move to round field in event to avoid panics and stuff
-    pub fn round_of(&self, event_hash: &event::Hash) -> RoundNum {
+    fn round_of(&self, event_hash: &event::Hash) -> RoundNum {
         match self.round_of.get(event_hash) {
             Some(r) => *r,
             None => {
