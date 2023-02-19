@@ -4,16 +4,17 @@ use thiserror::Error;
 use tracing::{debug, error, instrument, trace, warn};
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use self::ordering::OrderedEvents;
 use self::peer_index::{EventIndex, PeerIndex, PeerIndexEntry};
+use self::slice::SliceIterator;
 use super::event::{self, Event, Parents};
 use super::{EventKind, PushError, RoundNum};
 use crate::{PeerId, Timestamp};
 
 mod ordering;
 mod peer_index;
+mod slice;
 mod sync;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -70,7 +71,11 @@ impl From<WitnessUniqueFamousness> for WitnessFamousness {
 }
 
 #[derive(Error, Debug, PartialEq)]
-enum WitnessCheckError {
+#[error("Event with such hash is unknown to the graph (hash {0})")]
+pub struct UnknownEvent(event::Hash);
+
+#[derive(Error, Debug, PartialEq)]
+pub enum WitnessCheckError {
     #[error("This event is not a witness")]
     NotWitness,
     #[error(transparent)]
@@ -78,11 +83,7 @@ enum WitnessCheckError {
 }
 
 #[derive(Error, Debug, PartialEq)]
-#[error("Event with such hash is unknown to the graph")]
-struct UnknownEvent;
-
-#[derive(Error, Debug, PartialEq)]
-enum RoundUfwListError {
+pub enum RoundUfwListError {
     #[error("Round with this number is unknown yet")]
     UnknownRound,
     #[error("Fame of some witnesses in the round is undecided")]
@@ -90,15 +91,15 @@ enum RoundUfwListError {
 }
 
 #[derive(Error, Debug, PartialEq)]
-enum OrderingDataError {
-    #[error("No event with such hash is tracked")]
-    UnknownEvent,
+pub enum OrderingDataError {
     #[error("Ordering for the event is undecided")]
     Undecided,
+    #[error(transparent)]
+    UnknownEvent(#[from] UnknownEvent),
 }
 
 #[derive(Error, Debug, PartialEq)]
-enum OrderedEventsError {
+pub enum OrderedEventsError {
     #[error("Provided round number is not present in the graph")]
     UnknownRound,
     #[error("Given round is undecided")]
@@ -511,6 +512,7 @@ where
         }
     }
 
+    // TODO: check if works properly with forks
     /// Get events to be ordered by `round` (in no particular order yet).
     #[instrument(level = "trace", skip(self))]
     fn ordered_events(
@@ -570,8 +572,8 @@ where
             |event: &Event<TPayload>| match self.ordering_data(event.hash()) {
                 Ok((round_received, _, _)) => round_received < target_round_received,
                 Err(OrderingDataError::Undecided) => false,
-                Err(OrderingDataError::UnknownEvent) => {
-                    panic!("events referenced in events must be tracked")
+                Err(OrderingDataError::UnknownEvent(UnknownEvent(e))) => {
+                    panic!("events referenced in events must be tracked {e} is unknown.")
                 }
             },
             &self.all_events,
@@ -592,8 +594,8 @@ where
                         continue;
                     }
                 }
-                Err(OrderingDataError::UnknownEvent) => {
-                    panic!("iterator must iterate on existing events")
+                Err(OrderingDataError::UnknownEvent(UnknownEvent(e))) => {
+                    panic!("iterator must iterate on existing events. {e} is unknown.")
                 }
                 Err(OrderingDataError::Undecided) =>
                     trace!("Event does not have ordering data yet, assuming its round_received is higher than needed"),
@@ -657,7 +659,10 @@ impl<TPayload> Graph<TPayload> {
     /// Actually calculates the number according to needed properties.
     #[instrument(level = "debug", skip(self))]
     fn determine_round(&self, event_hash: &event::Hash) -> Result<RoundNum, UnknownEvent> {
-        let event = self.all_events.get(event_hash).ok_or(UnknownEvent)?;
+        let event = self
+            .all_events
+            .get(event_hash)
+            .ok_or(UnknownEvent(event_hash.clone()))?;
         match event.parents() {
             event::Kind::Genesis => Ok(0),
             event::Kind::Regular(Parents {
@@ -776,7 +781,7 @@ impl<TPayload> Graph<TPayload> {
         let r = match self
             .all_events
             .get(&event_hash)
-            .ok_or(UnknownEvent)?
+            .ok_or(UnknownEvent(event_hash.clone()))?
             .parents()
         {
             event::Kind::Genesis => true,
@@ -929,7 +934,7 @@ impl<TPayload> Graph<TPayload> {
         let author = self
             .all_events
             .get(event_hash)
-            .ok_or(WitnessCheckError::Unknown(UnknownEvent))?
+            .ok_or(WitnessCheckError::Unknown(UnknownEvent(event_hash.clone())))?
             .author();
 
         // Events created by the same author in the same round (except for this event)
@@ -995,7 +1000,7 @@ impl<TPayload> Graph<TPayload> {
         let event_signature = self
             .all_events
             .get(event_hash)
-            .ok_or(OrderingDataError::UnknownEvent)?
+            .ok_or(UnknownEvent(event_hash.clone()))?
             .signature();
 
         // "x is an ancestor of every round r unique famous witness", where `r` is
@@ -1185,88 +1190,6 @@ impl<'a, T> Iterator for SelfAncestorIter<'a, T> {
 impl<'a, T> DoubleEndedIterator for SelfAncestorIter<'a, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.event_list.pop_back()
-    }
-}
-
-struct SliceIterator<'a, TPayload, FStop> {
-    current_slice: HashSet<&'a Event<TPayload>>,
-    stop_iterate_peer: FStop,
-    all_events: &'a HashMap<event::Hash, Event<TPayload>>,
-}
-
-impl<'a, TPayload, FStop> SliceIterator<'a, TPayload, FStop>
-where
-    TPayload: Eq + std::hash::Hash,
-{
-    /// Create iterator over graph slice. It goes higher in ancestry (from the start to its
-    /// ancestors). Visits only events made by peers supplied in `starting_slice`. Does not
-    /// guarantee homogeneous (?) pass, i.e. might first go through only one peer and then
-    /// visit events of others.
-    ///
-    /// Stops looking into a peer when parents of all sliced events do not satisfy
-    /// `stop_condition`.
-    ///
-    /// `all_events` used for lookup of events since parents are stored in hashes (in the
-    /// events).
-    fn new(
-        starting_slice: &HashSet<&event::Hash>,
-        stop_condition: FStop,
-        all_events: &'a HashMap<event::Hash, Event<TPayload>>,
-    ) -> Result<Self, UnknownEvent>
-    where
-        TPayload: Eq + std::hash::Hash,
-    {
-        let current_slice: Result<Vec<_>, _> = starting_slice
-            .iter()
-            .map(|hash| all_events.get(hash).ok_or(UnknownEvent))
-            .collect();
-        let current_slice = HashSet::<_>::from_iter(current_slice?);
-        Ok(Self {
-            current_slice,
-            stop_iterate_peer: stop_condition,
-            all_events,
-        })
-    }
-
-    fn add_parents(&mut self, event: &Event<TPayload>) -> Result<(), UnknownEvent> {
-        if let event::Kind::Regular(parents) = event.parents() {
-            let self_parent = self
-                .all_events
-                .get(&parents.self_parent)
-                .ok_or(UnknownEvent)?;
-            self.current_slice.insert(self_parent);
-
-            // We add only parents made by the same peer not to visit events multiple times
-            let this_author = event.author();
-            let other_parent = self
-                .all_events
-                .get(&parents.other_parent)
-                .ok_or(UnknownEvent)?;
-            if other_parent.author() == this_author {
-                self.current_slice.insert(other_parent);
-            }
-        }
-        Ok(())
-    }
-}
-
-impl<'a, TPayload, FStop> Iterator for SliceIterator<'a, TPayload, FStop>
-where
-    FStop: Fn(&Event<TPayload>) -> bool,
-    TPayload: Eq + std::hash::Hash,
-{
-    type Item = &'a Event<TPayload>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let next_event = self.current_slice.iter().next().cloned()?;
-        self.current_slice.remove(next_event);
-        if (self.stop_iterate_peer)(next_event) {
-            None
-        } else {
-            self.add_parents(next_event)
-                .expect("parents must be tracked");
-            Some(next_event)
-        }
     }
 }
 
