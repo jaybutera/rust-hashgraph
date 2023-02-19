@@ -1,3 +1,9 @@
+//! Generation of data that allows more efficient sync.
+//!
+//! In particular, generates compressed version of known state.
+//! It means state with only some event hashes present. In best case of
+//! honest peers (no forking) it includes only log(N) of event hashes,
+//! where N is number of events created by the peer.
 use std::collections::HashMap;
 
 use itertools::unfold;
@@ -5,7 +11,10 @@ use thiserror::Error;
 
 use crate::{graph::event, PeerId};
 
-use crate::graph::datastructure::peer_index::{fork_tracking::{Extension, ForkIndexEntry}, PeerIndex, PeerIndexEntry};
+use crate::graph::datastructure::peer_index::{
+    fork_tracking::{Extension, ForkIndexEntry},
+    PeerIndex, PeerIndexEntry,
+};
 
 #[derive(Debug, Error, PartialEq)]
 #[error("Submultipliers within fork index differ")]

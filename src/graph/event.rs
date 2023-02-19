@@ -4,6 +4,8 @@ use serde_big_array::BigArray;
 
 use crate::{PeerId, Timestamp};
 
+use super::Signature;
+
 // smth like H256 ??? (some hash type)
 #[derive(Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
 pub struct Hash {
@@ -221,7 +223,7 @@ impl<TPayload> Event<TPayload> {
     }
 
     // TODO: actually have signature
-    pub fn signature(&self) -> &Hash {
+    pub fn signature(&self) -> &Signature {
         self.hash()
     }
 

@@ -442,7 +442,7 @@ where
         };
         let new_event_hash = graph.push_event(
             payload.next().expect("Iterator finished"),
-            PushKind::Regular(parents),
+            EventKind::Regular(parents),
             *author_id,
             *timestamps
                 .get(event_name)
@@ -481,7 +481,7 @@ where
                 .clone()
         } else {
             // Geneses must not have timestamp 0, but why not do it for testing other components
-            graph.push_event(payload, PushKind::Genesis, *id, 0)?
+            graph.push_event(payload, EventKind::Genesis, *id, 0)?
         };
         names.insert(hash, name.to_owned());
     }
@@ -756,7 +756,7 @@ fn duplicate_push_fails() {
     } = build_graph_from_paper((), 999).unwrap();
     let a_id = peers.get("a").unwrap().id;
     assert!(matches!(
-        graph.push_event((), PushKind::Genesis, a_id, 0),
+        graph.push_event((), EventKind::Genesis, a_id, 0),
         Err(PushError::EventAlreadyExists(hash)) if &hash == graph.peer_genesis(&a_id).unwrap()
     ));
 }
@@ -770,7 +770,7 @@ fn double_genesis_fails() {
         setup_name: _,
     } = build_graph_from_paper(0, 999).unwrap();
     assert!(matches!(
-        graph.push_event(1, PushKind::Genesis, peers.get("a").unwrap().id, 0),
+        graph.push_event(1, EventKind::Genesis, peers.get("a").unwrap().id, 0),
         Err(PushError::GenesisAlreadyExists)
     ))
 }
@@ -791,7 +791,7 @@ fn missing_parent_fails() {
         other_parent: legit_event_hash.clone(),
     };
     assert!(matches!(
-        graph.push_event((), PushKind::Regular(fake_parents_1), peers.get("a").unwrap().id, 0),
+        graph.push_event((), EventKind::Regular(fake_parents_1), peers.get("a").unwrap().id, 0),
         Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_event.hash()
     ));
 
@@ -800,7 +800,7 @@ fn missing_parent_fails() {
         other_parent: fake_event.hash().clone(),
     };
     assert!(matches!(
-        graph.push_event((), PushKind::Regular(fake_parents_2), peers.get("a").unwrap().id, 0),
+        graph.push_event((), EventKind::Regular(fake_parents_2), peers.get("a").unwrap().id, 0),
         Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_event.hash()
     ));
 }

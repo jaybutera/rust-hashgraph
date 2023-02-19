@@ -7,9 +7,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use self::ordering::OrderedEvents;
-use self::peer_index::{EventIndex, PeerIndexEntry, PeerIndex};
+use self::peer_index::{EventIndex, PeerIndex, PeerIndexEntry};
 use super::event::{self, Event, Parents};
-use super::{PushError, PushKind, RoundNum};
+use super::{EventKind, PushError, RoundNum};
 use crate::{PeerId, Timestamp};
 
 mod ordering;
@@ -154,7 +154,7 @@ where
         graph
             .push_event(
                 genesis_payload,
-                PushKind::Genesis,
+                EventKind::Genesis,
                 self_id,
                 genesis_timestamp,
             )
@@ -169,7 +169,7 @@ where
     pub fn push_event(
         &mut self,
         payload: TPayload,
-        event_type: PushKind,
+        event_type: EventKind,
         author: PeerId,
         time_created: Timestamp,
     ) -> Result<event::Hash, PushError> {
@@ -178,8 +178,8 @@ where
 
         trace!("Creating an event");
         let new_event = match event_type {
-            PushKind::Genesis => Event::new(payload, event::Kind::Genesis, author, time_created)?,
-            PushKind::Regular(Parents {
+            EventKind::Genesis => Event::new(payload, event::Kind::Genesis, author, time_created)?,
+            EventKind::Regular(Parents {
                 self_parent,
                 other_parent,
             }) => Event::new(
@@ -334,17 +334,33 @@ where
 // Synchronization-related stuff
 
 impl<TPayload> Graph<TPayload> {
+    /// 1st sync step - (reciever) send state known to us to the peer.
     pub fn graph_known_state(
         &self,
-    ) -> Result<sync::outward::CompressedKnownState, sync::outward::SubmultiplierMismatch> {
-        let res = sync::outward::CompressedKnownState::try_from(&self.peer_index);
+    ) -> Result<sync::state::CompressedKnownState, sync::state::SubmultiplierMismatch> {
+        let res = sync::state::CompressedKnownState::try_from(&self.peer_index);
         match &res {
             Ok(_state) => debug!("Successfully constructed compressed graph state"),
-            Err(sync::outward::SubmultiplierMismatch) => error!(
+            Err(sync::state::SubmultiplierMismatch) => error!(
                 "Fork index is inconsistent (submultipliers vary). Very strange, should not happen"
             ),
         };
         res
+    }
+
+    /// 2nd sync step - (sender) find which updates the peer must perform to get to the same
+    ///     (or higher) level of graph knowledge.
+    pub fn generate_sync_jobs(
+        &self,
+        peer_state: sync::state::CompressedKnownState,
+    ) -> sync::jobs::Jobs<TPayload> {
+        let events_unknown_by_receiver = {};
+        todo!()
+    }
+
+    /// 3rd sync step - try to apply the sync steps provided by the peer.
+    pub fn try_apply_sync(&mut self, jobs: sync::jobs::Jobs<TPayload>) -> Result<(), ()> {
+        todo!()
     }
 }
 
@@ -598,7 +614,11 @@ impl<TPayload> Graph<TPayload> {
 
     // for navigating the graph state externally
     pub fn peer_latest_event(&self, peer: &PeerId) -> Option<&event::Hash> {
-        self.peer_index.get(peer).map(|e| *e.latest_events().get(0).expect("At least genesis is present"))
+        self.peer_index.get(peer).map(|e| {
+            *e.latest_events()
+                .get(0)
+                .expect("At least genesis is present")
+        })
     }
 
     // for navigating the graph state externally

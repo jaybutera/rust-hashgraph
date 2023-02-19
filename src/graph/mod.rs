@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::PeerId;
+
 pub mod datastructure;
 pub mod event;
 
@@ -11,10 +13,11 @@ pub mod event;
 // TODO put a warning for such case or drop program.
 type RoundNum = usize;
 
-use crate::PeerId;
+// TODO: change to actual signature
+type Signature = event::Hash;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub enum PushKind {
+pub enum EventKind {
     Genesis,
     Regular(event::Parents),
 }
