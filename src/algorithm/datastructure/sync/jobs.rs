@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use petgraph::data::Build;
 
 use crate::{
-    algorithm::{event, EventKind, Signature, datastructure::peer_index::fork_tracking::ForkIndex},
+    algorithm::{datastructure::peer_index::fork_tracking::ForkIndex, event, EventKind, Signature},
     PeerId, Timestamp,
 };
 
@@ -44,25 +44,33 @@ impl<TPayload> Jobs<TPayload> {
 
     fn missing_events_graph<TGraph, TLookup>(
         peer_state: &CompressedKnownState,
-        event_lookup: TLookup,
+        event_lookup: &TLookup,
+        fork_index: &ForkIndex,
     ) -> TGraph
     where
         TGraph: Build,
         TLookup: Fn(&event::Hash) -> event::Event<TPayload>,
     {
-        let peer_jobs = peer_state
-            .as_vec()
-            .iter()
-            .map(|(id, state)| (*id, Self::latest_common_peer_events(state)));
+        let peer_jobs = peer_state.as_vec().iter().map(|(id, state)| {
+            (
+                *id,
+                Self::latest_common_peer_events(state, event_lookup, fork_index),
+            )
+        });
         todo!()
     }
 
-    fn latest_common_peer_events<TLookup>(peer_state: &CompressedPeerState, event_lookup: TLookup, fork_index: ForkIndex) -> Vec<&event::Hash>
+    fn latest_common_peer_events<TLookup>(
+        peer_state: &CompressedPeerState,
+        event_lookup: &TLookup,
+        fork_index: &ForkIndex,
+    ) -> Vec<event::Hash>
     where
         TLookup: Fn(&event::Hash) -> event::Event<TPayload>,
     {
         // probably compare with ForkIndex
-        
+        // let visitable_graph_until;
+        todo!()
     }
 }
 

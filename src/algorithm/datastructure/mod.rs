@@ -1,4 +1,5 @@
 use itertools::izip;
+use petgraph::visit::GraphBase;
 use serde::Serialize;
 use thiserror::Error;
 use tracing::{debug, error, instrument, trace, warn};
@@ -1191,6 +1192,23 @@ impl<'a, T> DoubleEndedIterator for SelfAncestorIter<'a, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.event_list.pop_back()
     }
+}
+
+#[derive(Hash, PartialEq, Clone)]
+struct Edge {
+    parent: event::Hash,
+    child: event::Hash,
+}
+
+#[derive(Hash, PartialEq, Clone)]
+enum EdgeIdentifier {
+    SelfParent(Edge),
+    OtherParent(Edge),
+}
+
+impl<TPayload> GraphBase for Graph<TPayload> {
+    type EdgeId = EdgeIdentifier;
+    type NodeId = event::Hash;
 }
 
 // Tests became larger than the code, so for easier navigation I've moved them

@@ -1,4 +1,5 @@
 pub mod algorithm;
+mod common;
 
 // Some peer identity type? probably make generic
 type PeerId = u64;
