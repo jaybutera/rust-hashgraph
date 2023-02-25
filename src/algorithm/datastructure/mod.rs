@@ -1194,21 +1194,21 @@ impl<'a, T> DoubleEndedIterator for SelfAncestorIter<'a, T> {
     }
 }
 
-#[derive(Hash, PartialEq, Clone)]
-struct Edge {
-    parent: event::Hash,
-    child: event::Hash,
+#[derive(Hash, PartialEq, Clone, Copy)]
+pub struct Edge<'a> {
+    parent: &'a event::Hash,
+    child: &'a event::Hash,
 }
 
-#[derive(Hash, PartialEq, Clone)]
-enum EdgeIdentifier {
-    SelfParent(Edge),
-    OtherParent(Edge),
+#[derive(Hash, PartialEq, Clone, Copy)]
+pub enum EdgeIdentifier<'a> {
+    SelfParent(Edge<'a>),
+    OtherParent(Edge<'a>),
 }
 
-impl<TPayload> GraphBase for Graph<TPayload> {
-    type EdgeId = EdgeIdentifier;
-    type NodeId = event::Hash;
+impl<'a, TPayload> GraphBase for &'a Graph<TPayload> {
+    type EdgeId = EdgeIdentifier<'a>;
+    type NodeId = &'a event::Hash;
 }
 
 // Tests became larger than the code, so for easier navigation I've moved them
