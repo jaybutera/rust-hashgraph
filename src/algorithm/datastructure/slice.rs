@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::graph::event::{self, Event};
+use crate::algorithm::event::{self, Event};
 
 use super::UnknownEvent;
 

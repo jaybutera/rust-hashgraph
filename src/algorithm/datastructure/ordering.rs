@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::{graph::event, Timestamp};
+use crate::{algorithm::event, Timestamp};
 
 /// Stores finalized/ordered events. We know the order of events that a
 /// decided round "sees" (not actually sees as definition says but has

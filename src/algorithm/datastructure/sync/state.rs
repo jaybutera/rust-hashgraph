@@ -9,9 +9,9 @@ use std::collections::HashMap;
 use itertools::unfold;
 use thiserror::Error;
 
-use crate::{graph::event, PeerId};
+use crate::{algorithm::event, PeerId};
 
-use crate::graph::datastructure::peer_index::{
+use crate::algorithm::datastructure::peer_index::{
     fork_tracking::{Extension, ForkIndexEntry},
     PeerIndex, PeerIndexEntry,
 };
@@ -34,6 +34,12 @@ impl TryFrom<&PeerIndex> for CompressedKnownState {
             .collect();
         let peer_states = peer_states?;
         Ok(Self { peer_states })
+    }
+}
+
+impl CompressedKnownState {
+    pub fn as_vec(&self) -> &Vec<(PeerId, CompressedPeerState)> {
+        &self.peer_states
     }
 }
 
@@ -102,6 +108,7 @@ struct EventsSection {
     /// if `length` >= `intermediate_threshold`, the first element is the first
     /// whose height `H` is a multiple of `submultiple` (`S`), the next one is with height
     /// `H+S`, then `H+2S, H+4S, H+8S, ...` until the end of the section is reached
+    // TODO: reverse this, I wanted H-S, H-2S, H-4S, H-8S... until the start of the section
     intermediates: Vec<(usize, event::Hash)>,
 }
 

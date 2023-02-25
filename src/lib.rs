@@ -1,4 +1,4 @@
-pub mod graph;
+pub mod algorithm;
 
 // Some peer identity type? probably make generic
 type PeerId = u64;

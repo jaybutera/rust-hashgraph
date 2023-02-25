@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use self::multiples::Multiples;
-use crate::graph::event;
+use crate::algorithm::event;
 
 // To not accidentally use private stuff
 mod multiples {
@@ -229,7 +229,7 @@ impl Extension {
 pub mod test_utils {
     use hex_literal::hex;
 
-    use crate::graph::event;
+    use crate::algorithm::event;
 
     use super::Extension;
 

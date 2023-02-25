@@ -5,7 +5,7 @@ use tracing::{instrument, trace, warn};
 
 pub use self::utils::Extension;
 use self::utils::SplitError;
-use crate::graph::event;
+use crate::algorithm::event;
 
 #[cfg(test)]
 pub use self::utils::test_utils;
