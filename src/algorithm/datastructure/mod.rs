@@ -1,5 +1,5 @@
 use itertools::izip;
-use petgraph::visit::GraphBase;
+use petgraph::visit::{GraphBase, Visitable};
 use serde::Serialize;
 use thiserror::Error;
 use tracing::{debug, error, instrument, trace, warn};
@@ -1209,6 +1209,18 @@ pub enum EdgeIdentifier<'a> {
 impl<'a, TPayload> GraphBase for &'a Graph<TPayload> {
     type EdgeId = EdgeIdentifier<'a>;
     type NodeId = &'a event::Hash;
+}
+
+impl<'a, TPayload> Visitable for &'a Graph<TPayload> {
+    type Map = HashSet<Self::NodeId>;
+
+    fn visit_map(self: &Self) -> Self::Map {
+        HashSet::with_capacity(self.all_events.len())
+    }
+
+    fn reset_map(self: &Self, map: &mut Self::Map) {
+        map.clear()
+    }
 }
 
 // Tests became larger than the code, so for easier navigation I've moved them

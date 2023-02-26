@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use petgraph::data::Build;
+use petgraph::{data::Build, visit::Visitable};
 
 use crate::{
     algorithm::{datastructure::peer_index::fork_tracking::ForkIndex, event, EventKind, Signature},
@@ -42,25 +42,28 @@ impl<TPayload> Jobs<TPayload> {
         // Self { peer_jobs }
     }
 
-    fn missing_events_graph<TGraph, TLookup>(
+    fn missing_events_graph<TGraphIn, TGraphOut, TLookup>(
+        current_state: &TGraphIn,
         peer_state: &CompressedKnownState,
         event_lookup: &TLookup,
         fork_index: &ForkIndex,
-    ) -> TGraph
+    ) -> TGraphOut
     where
-        TGraph: Build,
+        TGraphIn: Visitable,
+        TGraphOut: Build,
         TLookup: Fn(&event::Hash) -> event::Event<TPayload>,
     {
         let peer_jobs = peer_state.as_vec().iter().map(|(id, state)| {
             (
                 *id,
-                Self::latest_common_peer_events(state, event_lookup, fork_index),
+                Self::latest_common_peer_events(current_state, state, event_lookup, fork_index),
             )
         });
         todo!()
     }
 
-    fn latest_common_peer_events<TLookup>(
+    fn latest_common_peer_events<TGraphIn, TLookup>(
+        current_state: &TGraphIn,
         peer_state: &CompressedPeerState,
         event_lookup: &TLookup,
         fork_index: &ForkIndex,
@@ -69,7 +72,7 @@ impl<TPayload> Jobs<TPayload> {
         TLookup: Fn(&event::Hash) -> event::Event<TPayload>,
     {
         // probably compare with ForkIndex
-        // let visitable_graph_until;
+        let kek = crate::common::GraphVisitableFilter::new();
         todo!()
     }
 }

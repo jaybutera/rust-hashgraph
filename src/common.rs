@@ -1,30 +1,6 @@
-use std::{collections::HashSet, marker::PhantomData};
+use std::marker::PhantomData;
 
-use petgraph::visit::{GraphBase, VisitMap, Visitable, Walker};
-
-struct GraphWalkerFilter<TWalker, TGraph, TFilter> {
-    inner_walker: TWalker,
-    filter: TFilter,
-    // Passed as a context, needed for constraints
-    _graph: PhantomData<TGraph>,
-}
-
-impl<TWalker, TGraph, TFilter> Walker<TGraph> for GraphWalkerFilter<TWalker, TGraph, TFilter>
-where
-    TWalker: Walker<TGraph>,
-    TFilter: Fn(&TWalker::Item) -> bool,
-{
-    type Item = TWalker::Item;
-
-    fn walk_next(&mut self, context: TGraph) -> Option<Self::Item> {
-        let next = self.inner_walker.walk_next(context)?;
-        if (self.filter)(&next) {
-            Some(next)
-        } else {
-            None
-        }
-    }
-}
+use petgraph::visit::{GraphBase, VisitMap, Visitable};
 
 struct FilteredVisitMap<'a, TNode, TFilter, TInnerMap> {
     visited: TInnerMap,
@@ -62,7 +38,7 @@ where
     }
 }
 
-struct GraphVisitableFilter<TGraph, TFilter> {
+pub struct GraphVisitableFilter<TGraph, TFilter> {
     graph: TGraph,
     filter: TFilter,
 }
