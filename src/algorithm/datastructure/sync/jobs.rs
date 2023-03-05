@@ -121,7 +121,9 @@ impl<TPayload> Jobs<TPayload> {
     {
         let mut to_visit = start_events;
         let mut latest_known = vec![];
-        while let Some(next) = to_visit.pop() {}
+        while let Some(next) = to_visit.pop() {
+            // if self_index.fork_index().fork_ends().con
+        }
         todo!();
     }
 }

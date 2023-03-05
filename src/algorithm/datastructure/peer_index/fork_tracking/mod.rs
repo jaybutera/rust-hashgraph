@@ -115,7 +115,6 @@ impl Fork {
 /// Tracks events created by a single peer with respect to self child/self parent
 /// relation. Since by definition an event can only have a single self parent,
 /// we can represent it as tree.
-#[derive(Getters)]
 pub struct ForkIndex {
     /// Sections of the peer graph that do not end with a fork. Indexed by their
     /// first/starting element
@@ -124,6 +123,9 @@ pub struct ForkIndex {
     /// push)
     leaf_ends: HashMap<event::Hash, event::Hash>,
     forks: HashMap<event::Hash, Fork>,
+    /// Index of the first element of a fork by the last/ending element (for convenient
+    /// sync)
+    fork_ends: HashMap<event::Hash, event::Hash>,
     origin: event::Hash,
     // Should be consistent with actual submultiples inside since they're propagated
     // on creation without changes
@@ -141,6 +143,7 @@ impl ForkIndex {
             leafs: HashMap::new(),
             leaf_ends: HashMap::new(),
             forks: HashMap::new(),
+            fork_ends: HashMap::new(),
             origin: genesis.clone(),
             submultiple,
         };
@@ -177,7 +180,19 @@ impl ForkIndex {
     }
 
     fn insert_fork(&mut self, fork: Fork) {
+        self.fork_ends.insert(
+            fork.events.last_event().clone(),
+            fork.events.first_event().clone(),
+        );
         self.forks.insert(fork.events.first_event().clone(), fork);
+    }
+
+    fn remove_fork(&mut self, fork_identifier: &event::Hash) -> Option<Fork> {
+        // Separate block to ensure the borrow is dropped
+        let fork = self.forks.remove(&fork_identifier)?;
+        let end_identifier = &fork.events.last_event();
+        self.fork_ends.remove(end_identifier);
+        Some(fork)
     }
 
     fn insert_leaf(&mut self, leaf: Leaf) {
@@ -262,7 +277,7 @@ impl ForkIndex {
                 new_self_child,
             )?;
             // Now no errors can happen, so we're safe to remove
-            self.forks.remove(extension_identifier);
+            self.remove_fork(extension_identifier);
             self.insert_fork(parent_fork);
             self.insert_fork(firstborn_fork);
             self.insert_leaf(newborn_leaf);
