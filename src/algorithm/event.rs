@@ -88,6 +88,14 @@ pub struct Children {
     pub other_children: Vec<Hash>,
 }
 
+impl Into<Vec<Hash>> for Children {
+    fn into(self) -> Vec<Hash> {
+        let mut result: Vec<_> = self.self_child.into();
+        result.extend(self.other_children);
+        result
+    }
+}
+
 #[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
 pub enum SelfChild {
     HonestParent(Option<Hash>),

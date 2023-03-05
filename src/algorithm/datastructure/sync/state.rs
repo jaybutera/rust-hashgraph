@@ -6,6 +6,7 @@
 //! where N is number of events created by the peer.
 use std::collections::HashMap;
 
+use derive_getters::Getters;
 use itertools::unfold;
 use thiserror::Error;
 
@@ -43,6 +44,7 @@ impl CompressedKnownState {
     }
 }
 
+#[derive(Getters)]
 pub struct CompressedPeerState {
     origin: event::Hash,
     // Indexed by starting event
@@ -80,7 +82,7 @@ impl TryFrom<&PeerIndexEntry> for CompressedPeerState {
     }
 }
 
-enum CompressedStateEntry {
+pub enum CompressedStateEntry {
     /// Sequence of events with fork at the end (in case of dishonest author)
     Fork {
         events: EventsSection,
@@ -94,7 +96,7 @@ enum CompressedStateEntry {
 /// Helps to roughly figure out how many events are known in a chain (and to send)
 /// without transferring all of the events.
 #[derive(Debug, Clone, PartialEq)]
-struct EventsSection {
+pub struct EventsSection {
     first: event::Hash,
     first_height: usize,
     last: event::Hash,

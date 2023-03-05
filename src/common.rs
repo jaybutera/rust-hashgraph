@@ -1,75 +1,67 @@
-use std::marker::PhantomData;
+use std::collections::{HashSet, VecDeque};
+use std::hash::Hash;
 
-use petgraph::visit::{GraphBase, VisitMap, Visitable};
+pub trait Graph {
+    type NodeIdentifier;
 
-struct FilteredVisitMap<'a, TNode, TFilter, TInnerMap> {
-    visited: TInnerMap,
-    filter: &'a TFilter,
-    _node: PhantomData<TNode>,
+    fn neighbors(&self, node: &Self::NodeIdentifier) -> HashSet<Self::NodeIdentifier>;
 }
 
-impl<'a, TNode, TFilter, TInnerMap> FilteredVisitMap<'a, TNode, TFilter, TInnerMap> {
-    /// `filter` should return `true` if this node can be visited,
-    /// false otherwise.
-    fn new(inner_map: TInnerMap, filter: &'a TFilter) -> Self {
-        Self {
-            visited: inner_map,
-            filter,
-            _node: PhantomData,
+pub trait DirectedGraph: Graph {
+    /// Nodes without any incoming edhe
+    fn start_nodes(&self) -> HashSet<&Self::NodeIdentifier>;
+}
+
+pub struct BfsWithStop<'a, G: Graph, F> {
+    visited: HashSet<G::NodeIdentifier>,
+    graph: &'a G,
+    /// `true` if needs to stop at this node
+    stop_condition: F,
+    to_visit: VecDeque<&'a G::NodeIdentifier>,
+}
+
+// impl<'a, G, F> BfsWithStop<'a, G, F>
+// where
+//     G: Graph,
+// {
+//     pub fn new(stop_condition: F, graph: &G, starting_nodes: &[G::NodeIdentifier]) -> Self {
+//         Self {
+//             visited: HashSet::new(),
+//             stop_condition,
+//             graph,
+//             to_visit: VecDeque::from_iter(starting_nodes.into_iter()),
+//         }
+//     }
+// }
+
+enum BfsStopNode<'a, G: Graph> {
+    /// BFS continues after this node
+    Ordinary(&'a G::NodeIdentifier),
+    /// BFS did not add neighbors of this node
+    Stopped(&'a G::NodeIdentifier),
+}
+
+impl<'a, G, F> BfsWithStop<'a, G, F>
+where
+    G: Graph,
+    G::NodeIdentifier: Hash + Eq,
+    F: Fn(&G::NodeIdentifier) -> bool,
+{
+    fn next(&mut self) -> Option<BfsStopNode<G>> {
+        let next_node = self.to_visit.pop_front();
+        if let Some(node) = next_node {
+            if (self.stop_condition)(node) {
+                Some(BfsStopNode::Stopped(node))
+            } else {
+                for neighbor in self.graph.neighbors(node) {
+                    if !self.visited.contains(&neighbor) {
+                        // self.to_visit.push_back(&neighbor);
+                    }
+                }
+                Some(BfsStopNode::Ordinary(node))
+            }
+        } else {
+            None
         }
-    }
-}
-
-impl<'a, TNode, TFilter, TInnerMap> VisitMap<TNode>
-    for FilteredVisitMap<'a, TNode, TFilter, TInnerMap>
-where
-    TNode: std::hash::Hash + Eq + Clone,
-    TFilter: Fn(&TNode) -> bool,
-    TInnerMap: VisitMap<TNode>,
-{
-    fn visit(&mut self, a: TNode) -> bool {
-        let self_visited = self.is_visited(&a);
-        let inner_visited = self.visited.visit(a);
-        self_visited || inner_visited
-    }
-
-    fn is_visited(&self, a: &TNode) -> bool {
-        self.visited.is_visited(a) || !(self.filter)(&a)
-    }
-}
-
-pub struct GraphVisitableFilter<TGraph, TFilter> {
-    graph: TGraph,
-    filter: TFilter,
-}
-
-impl<TGraph, TFilter> GraphVisitableFilter<TGraph, TFilter> {
-    pub fn new(graph: TGraph, filter: TFilter) -> Self {
-        Self { graph, filter }
-    }
-}
-
-impl<TGraph, TFilter> GraphBase for GraphVisitableFilter<TGraph, TFilter>
-where
-    TGraph: GraphBase,
-{
-    type EdgeId = TGraph::EdgeId;
-    type NodeId = TGraph::NodeId;
-}
-
-impl<'a, TGraph, TFilter> Visitable for &'a GraphVisitableFilter<TGraph, TFilter>
-where
-    TGraph: Visitable,
-    TGraph::NodeId: std::hash::Hash + Eq,
-    TFilter: Fn(&TGraph::NodeId) -> bool,
-{
-    type Map = FilteredVisitMap<'a, TGraph::NodeId, TFilter, TGraph::Map>;
-
-    fn visit_map(self: &Self) -> Self::Map {
-        FilteredVisitMap::new(self.graph.visit_map(), &self.filter)
-    }
-
-    fn reset_map(self: &Self, map: &mut Self::Map) {
-        self.graph.reset_map(&mut map.visited)
     }
 }

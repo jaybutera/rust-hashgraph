@@ -1,5 +1,6 @@
 use std::{collections::HashMap, num::NonZeroU8};
 
+use derive_getters::Getters;
 use thiserror::Error;
 
 use crate::PeerId;
@@ -13,6 +14,7 @@ pub type EventIndex<TIndexPayload> = HashMap<event::Hash, TIndexPayload>;
 
 pub type PeerIndex = HashMap<PeerId, PeerIndexEntry>;
 
+#[derive(Getters)]
 pub struct PeerIndexEntry {
     origin: event::Hash,
     /// Use `add_latest` for insertion.
@@ -158,16 +160,12 @@ impl PeerIndexEntry {
         self.fork_index.leaf_events()
     }
 
-    pub fn origin(&self) -> &event::Hash {
-        &self.origin
-    }
-
     pub fn forks<'a>(&'a self) -> ForkIndexIter<'a> {
         self.fork_index.iter()
     }
 
     pub fn forks_submultiple(&self) -> NonZeroU8 {
-        self.fork_index.submultiple()
+        *self.fork_index.submultiple()
     }
 }
 

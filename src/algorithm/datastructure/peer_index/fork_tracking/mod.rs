@@ -1,5 +1,6 @@
 use std::{collections::HashMap, num::NonZeroU8};
 
+use derive_getters::Getters;
 use thiserror::Error;
 use tracing::{instrument, trace, warn};
 
@@ -114,6 +115,7 @@ impl Fork {
 /// Tracks events created by a single peer with respect to self child/self parent
 /// relation. Since by definition an event can only have a single self parent,
 /// we can represent it as tree.
+#[derive(Getters)]
 pub struct ForkIndex {
     /// Sections of the peer graph that do not end with a fork. Indexed by their
     /// first/starting element
@@ -123,6 +125,9 @@ pub struct ForkIndex {
     leaf_ends: HashMap<event::Hash, event::Hash>,
     forks: HashMap<event::Hash, Fork>,
     origin: event::Hash,
+    // Should be consistent with actual submultiples inside since they're propagated
+    // on creation without changes
+    //
     /// Submultiple for tracking intermediate events in [`Extension`]s
     submultiple: NonZeroU8,
 }
@@ -360,12 +365,6 @@ impl ForkIndex {
             .expect("Submultiple was correct before, so it must be here as well"),
         ));
         Ok(())
-    }
-
-    pub fn submultiple(&self) -> NonZeroU8 {
-        // Should be consistent with actual submultiples inside since they're propagated
-        // on creation without changes
-        self.submultiple
     }
 
     pub fn iter(&self) -> ForkIndexIter {

@@ -333,10 +333,10 @@ where
     }
 }
 
-// Synchronization-related stuff
-
+/// Synchronization-related stuff.
+/// details in [sync]
 impl<TPayload> Graph<TPayload> {
-    /// 1st sync step - (reciever) send state known to us to the peer.
+    /// 1st sync step - (at reciever) generate compressed state.
     pub fn graph_known_state(
         &self,
     ) -> Result<sync::state::CompressedKnownState, sync::state::SubmultiplierMismatch> {
@@ -350,8 +350,8 @@ impl<TPayload> Graph<TPayload> {
         res
     }
 
-    /// 2nd sync step - (sender) find which updates the peer must perform to get to the same
-    ///     (or higher) level of graph knowledge.
+    /// 2nd sync step - (at sender) find which updates the reciever must perform to get to the same
+    /// (or higher) level of graph knowledge as we have.
     pub fn generate_sync_jobs(
         &self,
         peer_state: sync::state::CompressedKnownState,
@@ -360,7 +360,7 @@ impl<TPayload> Graph<TPayload> {
         todo!()
     }
 
-    /// 3rd sync step - try to apply the sync steps provided by the peer.
+    /// 3rd sync step - (at reciever) try to apply the sync steps provided by the sender.
     pub fn try_apply_sync(&mut self, jobs: sync::jobs::Jobs<TPayload>) -> Result<(), ()> {
         todo!()
     }
@@ -1194,34 +1194,16 @@ impl<'a, T> DoubleEndedIterator for SelfAncestorIter<'a, T> {
     }
 }
 
-#[derive(Hash, PartialEq, Clone, Copy)]
-pub struct Edge<'a> {
-    parent: &'a event::Hash,
-    child: &'a event::Hash,
-}
+// impl<TPayload> crate::common::Graph for Graph<TPayload> {
+//     type NodeIdentifier = event::Hash;
 
-#[derive(Hash, PartialEq, Clone, Copy)]
-pub enum EdgeIdentifier<'a> {
-    SelfParent(Edge<'a>),
-    OtherParent(Edge<'a>),
-}
-
-impl<'a, TPayload> GraphBase for &'a Graph<TPayload> {
-    type EdgeId = EdgeIdentifier<'a>;
-    type NodeId = &'a event::Hash;
-}
-
-impl<'a, TPayload> Visitable for &'a Graph<TPayload> {
-    type Map = HashSet<Self::NodeId>;
-
-    fn visit_map(self: &Self) -> Self::Map {
-        HashSet::with_capacity(self.all_events.len())
-    }
-
-    fn reset_map(self: &Self, map: &mut Self::Map) {
-        map.clear()
-    }
-}
+//     fn neighbors(&self, node: &Self::NodeIdentifier) -> Vec<Self::NodeIdentifier> {
+//         let Some(event) = self.all_events.get(node) else {
+//             return vec![];
+//         };
+//         event.children.into()
+//     }
+// }
 
 // Tests became larger than the code, so for easier navigation I've moved them
 #[cfg(test)]
