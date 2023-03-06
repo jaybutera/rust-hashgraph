@@ -65,10 +65,14 @@ impl Leaf {
         );
         Ok((parent_fork, firstborn_fork, newborn_leaf))
     }
+
+    pub fn events(&self) -> &Extension {
+        &self.0
+    }
 }
 
 /// Sequence of events with branching at the end
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Getters)]
 pub struct Fork {
     events: Extension,
     /// First elements of each child
@@ -115,17 +119,18 @@ impl Fork {
 /// Tracks events created by a single peer with respect to self child/self parent
 /// relation. Since by definition an event can only have a single self parent,
 /// we can represent it as tree.
+#[derive(Getters)]
 pub struct ForkIndex {
     /// Sections of the peer graph that do not end with a fork. Indexed by their
     /// first/starting element
     leafs: HashMap<event::Hash, Leaf>,
     /// Index of the first element of a leaf by the last/ending element (for convenient
     /// push)
-    leaf_ends: HashMap<event::Hash, event::Hash>,
+    leaf_starts: HashMap<event::Hash, event::Hash>,
     forks: HashMap<event::Hash, Fork>,
     /// Index of the first element of a fork by the last/ending element (for convenient
-    /// sync)
-    fork_ends: HashMap<event::Hash, event::Hash>,
+    /// sync)??? Todo: remove???
+    fork_starts: HashMap<event::Hash, event::Hash>,
     origin: event::Hash,
     // Should be consistent with actual submultiples inside since they're propagated
     // on creation without changes
@@ -141,9 +146,9 @@ impl ForkIndex {
     pub fn new(genesis: event::Hash, submultiple: NonZeroU8) -> Self {
         let mut new_index = Self {
             leafs: HashMap::new(),
-            leaf_ends: HashMap::new(),
+            leaf_starts: HashMap::new(),
             forks: HashMap::new(),
-            fork_ends: HashMap::new(),
+            fork_starts: HashMap::new(),
             origin: genesis.clone(),
             submultiple,
         };
@@ -162,7 +167,7 @@ impl ForkIndex {
         self_parent: &event::Hash,
     ) -> Result<(), LeafPush> {
         let leaf_start = self
-            .leaf_ends
+            .leaf_starts
             .get(self_parent)
             .ok_or(LeafPush::InvalidSelfParent)?
             .clone();
@@ -174,13 +179,13 @@ impl ForkIndex {
             return Err(LeafPush::InconsistentState);
         }
         leaf.0.push_event(event.clone());
-        self.leaf_ends.remove(self_parent);
-        self.leaf_ends.insert(event, leaf_start);
+        self.leaf_starts.remove(self_parent);
+        self.leaf_starts.insert(event, leaf_start);
         Ok(())
     }
 
     fn insert_fork(&mut self, fork: Fork) {
-        self.fork_ends.insert(
+        self.fork_starts.insert(
             fork.events.last_event().clone(),
             fork.events.first_event().clone(),
         );
@@ -191,14 +196,14 @@ impl ForkIndex {
         // Separate block to ensure the borrow is dropped
         let fork = self.forks.remove(&fork_identifier)?;
         let end_identifier = &fork.events.last_event();
-        self.fork_ends.remove(end_identifier);
+        self.fork_starts.remove(end_identifier);
         Some(fork)
     }
 
     fn insert_leaf(&mut self, leaf: Leaf) {
         let first = leaf.0.first_event().clone();
         let last = leaf.0.last_event().clone();
-        self.leaf_ends.insert(last, first.clone());
+        self.leaf_starts.insert(last, first.clone());
         self.leafs.insert(first, leaf);
     }
 
@@ -206,7 +211,7 @@ impl ForkIndex {
         // Separate block to ensure the borrow is dropped
         let leaf = self.leafs.remove(&leaf_identifier)?;
         let end_identifier = &leaf.0.last_event();
-        self.leaf_ends.remove(&end_identifier);
+        self.leaf_starts.remove(&end_identifier);
         Some(leaf)
     }
 
@@ -390,7 +395,40 @@ impl ForkIndex {
     }
 
     pub fn leaf_events(&self) -> Vec<&event::Hash> {
-        self.leaf_ends.keys().collect()
+        self.leaf_starts.keys().collect()
+    }
+
+    // pub fn submultiple(&self) -> NonZeroU8 {
+    //     self.submultiple
+    // }
+
+    /// Get fork either by its start or end.
+    fn find_fork(&self, event: &event::Hash) -> Option<&Fork> {
+        self.forks
+            .get(event)
+            .or_else(|| self.forks.get(self.fork_starts.get(event)?))
+    }
+
+    /// Get fork either by its start or end.
+    fn find_leaf(&self, event: &event::Hash) -> Option<&Leaf> {
+        self.leafs
+            .get(event)
+            .or_else(|| self.leafs.get(self.leaf_starts.get(event)?))
+    }
+
+    // /// Find extension by its start or end.
+    // pub fn find_extension(&self, event: &event::Hash) -> Option<&Extension> {
+    //     self.find_leaf(event)
+    //         .map(|leaf| leaf.events())
+    //         .or_else(|| self.find_fork(event).map(|fork| fork.events()))
+    // }
+
+    /// Find extension by its start.
+    pub fn find_extension(&self, start: &event::Hash) -> Option<&Extension> {
+        self.leafs
+            .get(start)
+            .map(|leaf| leaf.events())
+            .or_else(|| self.forks.get(start).map(|fork| fork.events()))
     }
 }
 
