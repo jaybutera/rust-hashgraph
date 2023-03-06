@@ -48,7 +48,10 @@ impl CompressedKnownState {
 pub struct CompressedPeerState {
     origin: event::Hash,
     // Indexed by starting event
-    data: HashMap<event::Hash, CompressedStateEntry>,
+    entries: HashMap<event::Hash, CompressedStateEntry>,
+    // Start of entries in `data` by ends of corresponding
+    // sections
+    entries_starts: HashMap<event::Hash, event::Hash>,
 }
 
 impl TryFrom<&PeerIndexEntry> for CompressedPeerState {
@@ -75,9 +78,14 @@ impl TryFrom<&PeerIndexEntry> for CompressedPeerState {
             })
             .collect();
         let data = data_res?;
+        let data_starts: HashMap<_, _> = data
+            .iter()
+            .map(|(start, entry)| (entry.section().last.clone(), start.clone()))
+            .collect();
         Ok(Self {
             origin: value.origin().clone(),
-            data,
+            entries: data,
+            entries_starts: data_starts,
         })
     }
 }
@@ -91,6 +99,15 @@ pub enum CompressedStateEntry {
     },
     /// Just a sequence of events
     Leaf(EventsSection),
+}
+
+impl CompressedStateEntry {
+    pub fn section(&self) -> &EventsSection {
+        match self {
+            CompressedStateEntry::Fork { events, .. } => events,
+            CompressedStateEntry::Leaf(events) => events,
+        }
+    }
 }
 
 /// Helps to roughly figure out how many events are known in a chain (and to send)
@@ -116,8 +133,12 @@ pub struct EventsSection {
 
 impl EventsSection {
     // temp to update tests later??
-    fn intermediates(&self) -> &Vec<(usize, event::Hash)> {
+    pub fn intermediates(&self) -> &Vec<(usize, event::Hash)> {
         &self.intermediates
+    }
+
+    pub fn submultiple(&self) -> u32 {
+        self.submultiple
     }
 }
 
@@ -183,11 +204,11 @@ mod tests {
 
     #[test]
     fn section_constructs_correctly() {
-        let mut fake_event_hashes = FAKE_HASHES.iter().map(|h| event::Hash::from_array(*h));
+        let fake_event_hashes_init = FAKE_HASHES.iter().map(|h| event::Hash::from_array(*h));
         // For 15 events and submultiple 3, the section should save hashes of
         // events at heights 0, 3, 6, 12.
         let section_1 = {
-            let mut fake_event_hashes = fake_event_hashes.clone();
+            let mut fake_event_hashes = fake_event_hashes_init.clone();
             let mut ext = Extension::from_event_with_submultiple(
                 fake_event_hashes.next().unwrap().clone(),
                 0,
@@ -201,7 +222,7 @@ mod tests {
         };
         // test for 13 events (at height 12 is the last one)
         let section_2 = {
-            let mut fake_event_hashes = fake_event_hashes.clone().take(13);
+            let mut fake_event_hashes = fake_event_hashes_init.clone().take(13);
             let mut ext = Extension::from_event_with_submultiple(
                 fake_event_hashes.next().unwrap().clone(),
                 0,
@@ -214,6 +235,7 @@ mod tests {
             EventsSection::from(&ext)
         };
 
+        let mut fake_event_hashes = fake_event_hashes_init.clone();
         let expected = vec![
             (0, fake_event_hashes.nth(0).unwrap()),
             (3, fake_event_hashes.nth(2).unwrap()),
@@ -224,6 +246,30 @@ mod tests {
         assert_eq!(section_1.intermediates(), &expected);
 
         assert_eq!(section_2.intermediates(), &expected);
+
+        // Start height is not necessary 0
+        let section_3 = {
+            let mut fake_event_hashes = fake_event_hashes_init.clone().take(15);
+            let mut ext = Extension::from_event_with_submultiple(
+                fake_event_hashes.next().unwrap().clone(),
+                11,
+                3,
+            )
+            .unwrap();
+            for h in fake_event_hashes {
+                ext.push_event(h);
+            }
+            EventsSection::from(&ext)
+        };
+
+        let mut fake_event_hashes = fake_event_hashes_init.clone();
+        let expected = vec![
+            (12, fake_event_hashes.nth(1).unwrap()),
+            (15, fake_event_hashes.nth(2).unwrap()),
+            (18, fake_event_hashes.nth(2).unwrap()),
+            (24, fake_event_hashes.nth(5).unwrap()),
+        ];
+        assert_eq!(section_3.intermediates(), &expected);
     }
 
     #[test]
@@ -287,7 +333,7 @@ mod tests {
 
         let peer_state = CompressedPeerState::try_from(&index).unwrap();
         assert_eq!(peer_state.origin, genesis_hash);
-        let mut entries = peer_state.data.iter();
+        let mut entries = peer_state.entries.iter();
 
         let Some((start_hash, entry)) = entries.next()
         else {
@@ -341,7 +387,7 @@ mod tests {
         let peer_state = CompressedPeerState::try_from(&index).unwrap();
         assert_eq!(peer_state.origin, genesis_hash);
 
-        let Some(entry) = peer_state.data.get(&genesis_hash)
+        let Some(entry) = peer_state.entries.get(&genesis_hash)
         else {
             panic!("should produce corresponding structure");
         };
@@ -357,7 +403,7 @@ mod tests {
         let mut forks = HashSet::<_>::from_iter(forks.into_iter());
         assert!(forks.remove(event_16.hash()));
 
-        let Some(entry) = peer_state.data.get(&event_16.hash())
+        let Some(entry) = peer_state.entries.get(&event_16.hash())
         else {
             panic!("should produce corresponding structure");
         };
@@ -390,7 +436,7 @@ mod tests {
         assert_eq!(gen_children_without_16.next(), None);
         assert_eq!(last_fork_hash, &event_1_hash);
 
-        let Some(entry) = peer_state.data.get(&last_fork_hash)
+        let Some(entry) = peer_state.entries.get(&last_fork_hash)
         else {
             panic!("should produce corresponding structure");
         };
