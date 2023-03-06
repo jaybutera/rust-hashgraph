@@ -86,14 +86,17 @@ mod multiples {
         /// # Example
         /// If `submultiple=10` and the first known multiple is 20, then
         /// `get(0)` will yield to `20`, and `get(3) = 50`.
-        pub fn get(&self, i: usize) -> Option<(usize, TItem)> {
+        pub fn get_ith(&self, i: usize) -> Option<(&usize, &TItem)> {
             // It must already be a multiple of `submultiple` since
             // we don't add items here if they're not
             let first_height = self.items.first_key_value()?.0;
             let i_height = first_height.saturating_add(i.saturating_mul(self.submultiple.into()));
-            self.items
-                .get_key_value(&i_height)
-                .map(|(index, item)| (index.clone(), item.clone()))
+            self.items.get_key_value(&i_height)
+            // .map(|(index, item)| (index.clone(), item.clone()))
+        }
+
+        pub fn get_by_height(&self, height: usize) -> Option<&TItem> {
+            self.items.get(&height)
         }
     }
 }

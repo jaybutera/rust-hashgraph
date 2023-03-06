@@ -1,5 +1,4 @@
 use itertools::izip;
-use petgraph::visit::{GraphBase, Visitable};
 use serde::Serialize;
 use thiserror::Error;
 use tracing::{debug, error, instrument, trace, warn};
@@ -1194,16 +1193,22 @@ impl<'a, T> DoubleEndedIterator for SelfAncestorIter<'a, T> {
     }
 }
 
-// impl<TPayload> crate::common::Graph for Graph<TPayload> {
-//     type NodeIdentifier = event::Hash;
+impl<TPayload> crate::common::Graph for Graph<TPayload> {
+    type NodeIdentifier = event::Hash;
+    type NodeIdentifiers =
+        std::iter::Flatten<std::option::IntoIter<std::vec::IntoIter<event::Hash>>>;
 
-//     fn neighbors(&self, node: &Self::NodeIdentifier) -> Vec<Self::NodeIdentifier> {
-//         let Some(event) = self.all_events.get(node) else {
-//             return vec![];
-//         };
-//         event.children.into()
-//     }
-// }
+    fn neighbors(&self, node: &Self::NodeIdentifier) -> Self::NodeIdentifiers {
+        self.all_events
+            .get(node)
+            .map(|some_event| {
+                let children: Vec<_> = some_event.children.clone().into();
+                children.into_iter()
+            })
+            .into_iter()
+            .flatten()
+    }
+}
 
 // Tests became larger than the code, so for easier navigation I've moved them
 #[cfg(test)]

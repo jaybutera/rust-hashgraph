@@ -4,8 +4,6 @@ use std::{
     ops::Deref,
 };
 
-use tracing::Level;
-
 use super::*;
 /// Filter for `tracing_subscriber` that passes all messages from the given function.
 /// Should be useful for debugging test cases (actually was at least once).

@@ -157,13 +157,17 @@ impl From<&Extension> for EventsSection {
             // also 0 at the start since we index from zero
             let indexes = [0].into_iter().chain(powers_of_2);
             indexes
-                .map(|i| value.multiples().get(i))
+                .map(|i| value.multiples().get_ith(i))
                 .take_while(|x| x.is_some())
                 .filter_map(|x| x)
                 .collect()
         } else {
             vec![]
         };
+        let intermediates = intermediates
+            .into_iter()
+            .map(|(a, b)| (a.clone(), b.clone()))
+            .collect();
         Self {
             first: value.first_event().clone(),
             first_height: value.first_height().clone(),
