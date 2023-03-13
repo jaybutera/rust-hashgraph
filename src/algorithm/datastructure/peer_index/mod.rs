@@ -74,10 +74,10 @@ impl PeerIndexEntry {
         match parent_self_children {
             event::SelfChild::HonestParent(None) => {}
             event::SelfChild::HonestParent(Some(_)) | event::SelfChild::ForkingParent(_) => {
-                self.fork_index.track_fork(self_parent, event);
+                self.fork_index.track_fork(self_parent, event.clone());
             }
         }
-        self.authored_events.insert(event, ());
+        self.authored_events.insert(event.clone(), ());
         self.latest_event = event;
         Ok(())
     }
@@ -88,18 +88,18 @@ mod tests {
     use std::time::Duration;
 
     // Returns the index and all_events tracker
-    fn construct_peer_index<TPayload>(
+    fn construct_peer_index<TPayload: Clone>(
         events: &[(event::Event<TPayload>)],
     ) -> (PeerIndexEntry, HashMap<event::Hash, event::Event<TPayload>>) {
-        let events = events.into_iter();
-        let mut all_events = HashMap::new();
+        let mut events = events.into_iter();
+        let mut all_events: HashMap<event::Hash, event::Event<TPayload>> = HashMap::new();
         let genesis = events.next().expect("event list must be nonempty");
-        all_events.insert(genesis.hash().clone(), *genesis.clone());
+        all_events.insert(genesis.hash().clone(), genesis.clone());
         let mut peer_index = PeerIndexEntry::new(genesis.hash().clone());
         for event in events {
-            all_events.insert(event.hash().clone(), *event.clone());
+            all_events.insert(event.hash().clone(), event.clone());
             let self_parent = if let event::Kind::Regular(p) = event.parents() {
-                p.self_parent
+                p.self_parent.clone()
             } else {
                 panic!("2 geneses, can't add to the index");
             };
@@ -120,6 +120,8 @@ mod tests {
         }
         (peer_index, all_events)
     }
+
+    use itertools::Itertools;
 
     use super::*;
     #[test]
@@ -258,7 +260,20 @@ mod tests {
             .unwrap();
 
         // check test for correctness
-        let events = vec![event_a, event_b, event_c, event_d, event_e, event_f];
+        let events = vec![a_hash, b_hash, c_hash, d_hash, e_hash, f_hash];
+        let events = events
+            .into_iter()
+            .map(|h| all_events.get(&h).expect("msg").clone())
+            .collect_vec();
         let (index_2, all_events_2) = construct_peer_index(&events);
+        // assert_eq!(index, index_2);
+        let keys = HashSet::<_>::from_iter(all_events.keys().into_iter());
+        let keys_2 = HashSet::<_>::from_iter(all_events_2.keys().into_iter());
+        assert_eq!(keys, keys_2);
+        for hash in all_events.keys() {
+            let e = all_events.get(hash).unwrap();
+            let e2 = all_events_2.get(hash).unwrap();
+            assert_eq!(e, e2, "{:#?} != {:#?}", e, e2);
+        }
     }
 }
