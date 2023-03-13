@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use derive_getters::Getters;
 use thiserror::Error;
@@ -27,17 +27,8 @@ pub struct PeerIndexEntry {
 
 #[derive(Debug, Error, PartialEq)]
 pub enum Error {
-    #[error("Provided parent hash cannot be looked up with given method")]
-    UnknownParent,
-    #[error(
-        "Provided parent does not have self children, however it is not \
-        tracked by fork index. Likely due to inconsistent state of the index with event contents."
-    )]
-    InvalidParent,
     #[error("Attempted to add an event that is already present in the index")]
     EventAlreadyKnown,
-    #[error("Events found via the lookup contain reference unknown events")]
-    InconsistentLookup,
 }
 
 impl PeerIndexEntry {
@@ -85,11 +76,12 @@ impl PeerIndexEntry {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use super::*;
+    use std::{collections::HashSet, time::Duration};
 
     // Returns the index and all_events tracker
     fn construct_peer_index<TPayload: Clone>(
-        events: &[(event::Event<TPayload>)],
+        events: &[event::Event<TPayload>],
     ) -> (PeerIndexEntry, HashMap<event::Hash, event::Event<TPayload>>) {
         let mut events = events.into_iter();
         let mut all_events: HashMap<event::Hash, event::Event<TPayload>> = HashMap::new();
@@ -121,9 +113,6 @@ mod tests {
         (peer_index, all_events)
     }
 
-    use itertools::Itertools;
-
-    use super::*;
     #[test]
     fn test_peer_index_constructs() {
         // Resulting layout; events are added in alphabetical order
