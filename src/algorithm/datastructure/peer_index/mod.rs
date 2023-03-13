@@ -134,15 +134,12 @@ mod tests {
         //     D
 
         let peer = 3u64;
-        let start_time = Duration::from_secs(1674549572);
-        let mut all_events = HashMap::new();
+        let start_time = Duration::from_secs(0);
 
         // Since we work with actual events, we can't use our sample hashes.
         let event_a =
             event::Event::new((), event::Kind::Genesis, peer, start_time.as_secs().into()).unwrap();
         let a_hash = event_a.hash().clone();
-        all_events.insert(a_hash.clone(), event_a);
-        let mut index = PeerIndexEntry::new(a_hash.clone());
 
         let event_b = event::Event::new(
             (),
@@ -156,16 +153,6 @@ mod tests {
         )
         .unwrap();
         let b_hash = event_b.hash().clone();
-        all_events.insert(b_hash.clone(), event_b);
-        all_events
-            .get_mut(&a_hash)
-            .unwrap()
-            .children
-            .self_child
-            .add_child(b_hash.clone());
-        index
-            .add_event(all_events.get(&a_hash).expect("aboba"), b_hash.clone())
-            .unwrap();
 
         let event_c = event::Event::new(
             (),
@@ -178,17 +165,6 @@ mod tests {
             (start_time + Duration::from_secs(3)).as_secs().into(),
         )
         .unwrap();
-        let c_hash = event_c.hash().clone();
-        all_events.insert(c_hash.clone(), event_c);
-        all_events
-            .get_mut(&b_hash)
-            .unwrap()
-            .children
-            .self_child
-            .add_child(c_hash.clone());
-        index
-            .add_event(all_events.get(&b_hash).expect("akeke"), c_hash.clone())
-            .unwrap();
 
         let event_d = event::Event::new(
             (),
@@ -201,17 +177,6 @@ mod tests {
             (start_time + Duration::from_secs(4)).as_secs().into(),
         )
         .unwrap();
-        let d_hash = event_d.hash().clone();
-        all_events.insert(d_hash.clone(), event_d);
-        all_events
-            .get_mut(&b_hash)
-            .unwrap()
-            .children
-            .self_child
-            .add_child(d_hash.clone());
-        index
-            .add_event(all_events.get(&b_hash).expect("akeke"), d_hash.clone())
-            .unwrap();
 
         let event_e = event::Event::new(
             (),
@@ -224,17 +189,6 @@ mod tests {
             (start_time + Duration::from_secs(5)).as_secs().into(),
         )
         .unwrap();
-        let e_hash = event_e.hash().clone();
-        all_events.insert(e_hash.clone(), event_e);
-        all_events
-            .get_mut(&b_hash)
-            .unwrap()
-            .children
-            .self_child
-            .add_child(e_hash.clone());
-        index
-            .add_event(all_events.get(&b_hash).expect("akeke"), e_hash.clone())
-            .unwrap();
 
         let event_f = event::Event::new(
             (),
@@ -247,33 +201,34 @@ mod tests {
             (start_time + Duration::from_secs(6)).as_secs().into(),
         )
         .unwrap();
-        let f_hash = event_f.hash().clone();
-        all_events.insert(f_hash.clone(), event_f);
-        all_events
-            .get_mut(&a_hash)
-            .unwrap()
-            .children
-            .self_child
-            .add_child(f_hash.clone());
-        index
-            .add_event(all_events.get(&a_hash).expect("akeke"), f_hash.clone())
-            .unwrap();
 
         // check test for correctness
-        let events = vec![a_hash, b_hash, c_hash, d_hash, e_hash, f_hash];
-        let events = events
-            .into_iter()
-            .map(|h| all_events.get(&h).expect("msg").clone())
-            .collect_vec();
-        let (index_2, all_events_2) = construct_peer_index(&events);
-        // assert_eq!(index, index_2);
-        let keys = HashSet::<_>::from_iter(all_events.keys().into_iter());
-        let keys_2 = HashSet::<_>::from_iter(all_events_2.keys().into_iter());
-        assert_eq!(keys, keys_2);
-        for hash in all_events.keys() {
-            let e = all_events.get(hash).unwrap();
-            let e2 = all_events_2.get(hash).unwrap();
-            assert_eq!(e, e2, "{:#?} != {:#?}", e, e2);
-        }
+        let events = vec![event_a, event_b, event_c, event_d, event_e, event_f];
+        let (index_2, _all_events_2) = construct_peer_index(&events);
+
+        let authored_events_expected =
+            HashMap::<_, _>::from_iter(events.iter().map(|e| (e.hash().clone(), ())));
+        assert_eq!(
+            index_2.authored_events(),
+            &authored_events_expected,
+            "authored events not tracked correctly"
+        );
+        assert_eq!(index_2.latest_event(), events.last().unwrap().hash());
+        assert_eq!(index_2.origin(), events.first().unwrap().hash());
+        let forks_expected = HashMap::<_, _>::from_iter([
+            (
+                events[0].hash().clone(),
+                HashSet::<_>::from_iter([events[1].hash(), events[5].hash()].into_iter().cloned()),
+            ),
+            (
+                events[1].hash().clone(),
+                HashSet::<_>::from_iter(
+                    [events[2].hash(), events[3].hash(), events[4].hash()]
+                        .into_iter()
+                        .cloned(),
+                ),
+            ),
+        ]);
+        assert_eq!(index_2.fork_index().forks(), &forks_expected);
     }
 }

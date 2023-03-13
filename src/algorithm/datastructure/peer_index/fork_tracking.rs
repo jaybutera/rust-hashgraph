@@ -1,7 +1,10 @@
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 
+use derive_getters::Getters;
+
 use crate::algorithm::event;
 
+#[derive(Getters)]
 pub struct ForkIndex {
     forks: HashMap<event::Hash, HashSet<event::Hash>>,
 }
