@@ -6,7 +6,7 @@ use tracing::{debug, error, instrument, trace, warn};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use self::ordering::OrderedEvents;
-use self::peer_index::{EventIndex, PeerIndex, PeerIndexEntry};
+use self::peer_index::{PeerIndex, PeerIndexEntry};
 use self::slice::SliceIterator;
 use super::event::{self, Event, Parents};
 use super::{EventKind, PushError, RoundNum};
@@ -105,6 +105,8 @@ pub enum OrderedEventsError {
     #[error("Given round is undecided")]
     UndecidedRound,
 }
+
+pub type EventIndex<TValue> = HashMap<event::Hash, TValue>;
 
 pub struct Graph<TPayload> {
     all_events: EventIndex<Event<TPayload>>,
@@ -208,10 +210,7 @@ where
                     return Err(PushError::GenesisAlreadyExists);
                 }
                 debug!("The event is valid, updating state to include it");
-                let new_peer_index = PeerIndexEntry::new(
-                    new_event.hash().clone(),
-                    std::num::NonZeroU8::new(10u8).unwrap(),
-                );
+                let new_peer_index = PeerIndexEntry::new(new_event.hash().clone());
                 self.peer_index.insert(author, new_peer_index);
             }
             event::Kind::Regular(parents) => {
@@ -259,11 +258,8 @@ where
                     .children
                     .self_child
                     .add_child(new_event.hash().clone());
-                if let Err(e) = author_index.add_event(
-                    self_parent_event.hash().clone(),
-                    new_event.hash().clone(),
-                    |h| self.all_events.get(h),
-                ) {
+                if let Err(e) = author_index.add_event(self_parent_event, new_event.hash().clone())
+                {
                     warn!("Peer index insertion error: {}", e);
                 }
                 let other_parent_event = self
@@ -333,37 +329,7 @@ where
 }
 
 /// Synchronization-related stuff.
-/// details in [sync]
-impl<TPayload> Graph<TPayload> {
-    /// 1st sync step - (at reciever) generate compressed state.
-    pub fn graph_known_state(
-        &self,
-    ) -> Result<sync::state::CompressedKnownState, sync::state::SubmultiplierMismatch> {
-        let res = sync::state::CompressedKnownState::try_from(&self.peer_index);
-        match &res {
-            Ok(_state) => debug!("Successfully constructed compressed graph state"),
-            Err(sync::state::SubmultiplierMismatch) => error!(
-                "Fork index is inconsistent (submultipliers vary). Very strange, should not happen"
-            ),
-        };
-        res
-    }
-
-    /// 2nd sync step - (at sender) find which updates the reciever must perform to get to the same
-    /// (or higher) level of graph knowledge as we have.
-    pub fn generate_sync_jobs(
-        &self,
-        peer_state: sync::state::CompressedKnownState,
-    ) -> sync::jobs::Jobs<TPayload> {
-        let events_unknown_by_receiver = {};
-        todo!()
-    }
-
-    /// 3rd sync step - (at reciever) try to apply the sync steps provided by the sender.
-    pub fn try_apply_sync(&mut self, jobs: sync::jobs::Jobs<TPayload>) -> Result<(), ()> {
-        todo!()
-    }
-}
+impl<TPayload> Graph<TPayload> {}
 
 impl<TPayload> Graph<TPayload>
 where
@@ -552,7 +518,7 @@ where
             let mut extension = vec![];
             for (peer_id, index) in &self.peer_index {
                 if !peers_hit.contains(&peer_id) {
-                    extension.push(index.latest_events()[0]);
+                    extension.push(index.latest_event());
                 }
             }
             trace!(
@@ -616,11 +582,7 @@ impl<TPayload> Graph<TPayload> {
 
     // for navigating the graph state externally
     pub fn peer_latest_event(&self, peer: &PeerId) -> Option<&event::Hash> {
-        self.peer_index.get(peer).map(|e| {
-            *e.latest_events()
-                .get(0)
-                .expect("At least genesis is present")
-        })
+        self.peer_index.get(peer).map(|e| e.latest_event())
     }
 
     // for navigating the graph state externally

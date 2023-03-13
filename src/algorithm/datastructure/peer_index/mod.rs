@@ -1,35 +1,28 @@
-use std::{collections::HashMap, num::NonZeroU8};
+use std::collections::{HashMap, HashSet};
 
 use derive_getters::Getters;
 use thiserror::Error;
 
 use crate::PeerId;
 
-use self::fork_tracking::{ForkIndex, ForkIndexIter, LeafPush, LookupIndexInconsistency};
-use super::event;
+use self::fork_tracking::ForkIndex;
+use super::{event, EventIndex};
 
 pub mod fork_tracking;
-
-pub type EventIndex<TIndexPayload> = HashMap<event::Hash, TIndexPayload>;
 
 pub type PeerIndex = HashMap<PeerId, PeerIndexEntry>;
 
 #[derive(Getters)]
 pub struct PeerIndexEntry {
     origin: event::Hash,
-    /// Use `add_latest` for insertion.
-    ///
-    /// Value is height of the event from genesis if considering self parent/self
-    /// child relationship. Genesis (should) have height 0.
-    ///
-    /// In other words, height is a distance from genesis through `self_parent`s
-    authored_events: EventIndex<usize>,
+    authored_events: EventIndex<()>,
     /// Forks authored by the peer that we've observed. Forks are events
     /// that have the same `self_parent`.
     ///
     /// Represented by event hashes that have multiple self children
     /// (children authored by the same peer)
     fork_index: ForkIndex,
+    latest_event: event::Hash,
 }
 
 #[derive(Debug, Error, PartialEq)]
@@ -45,31 +38,23 @@ pub enum Error {
     EventAlreadyKnown,
     #[error("Events found via the lookup contain reference unknown events")]
     InconsistentLookup,
-    #[error("State of the index and lookup state are inconsistent")]
-    LookupIndexInconsistency(#[from] LookupIndexInconsistency),
-    #[error("Pushing leaf (non-forking) event failed")]
-    LeafPush(#[from] LeafPush),
 }
 
 impl PeerIndexEntry {
-    pub fn new(genesis: event::Hash, fork_index_submultiple: NonZeroU8) -> Self {
+    pub fn new(genesis: event::Hash) -> Self {
         Self {
             origin: genesis.clone(),
-            authored_events: HashMap::from([(genesis.clone(), 0)]),
-            fork_index: ForkIndex::new(genesis, fork_index_submultiple),
+            authored_events: HashMap::from([(genesis.clone(), ())]),
+            fork_index: ForkIndex::new(),
+            latest_event: genesis.clone(),
         }
     }
 
-    pub fn add_event<'a, F, TPayload>(
+    pub fn add_event<TPayload>(
         &mut self,
-        self_parent: event::Hash,
+        self_parent: &event::Event<TPayload>,
         event: event::Hash,
-        event_lookup: F,
-    ) -> Result<(), Error>
-    where
-        F: Fn(&event::Hash) -> Option<&'a event::Event<TPayload>>,
-        TPayload: 'a,
-    {
+    ) -> Result<(), Error> {
         // First do all checks, only then apply changes, to keep the state consistent
 
         // TODO: represent it in some way in the code. E.g. by creating 2 functions
@@ -80,98 +65,61 @@ impl PeerIndexEntry {
         if self.authored_events.contains_key(&event) {
             return Err(Error::EventAlreadyKnown);
         }
-        let parent_event = event_lookup(&self_parent).ok_or(Error::UnknownParent)?;
-        let parent_height = self
-            .authored_events
-            .get(&self_parent)
-            .ok_or(Error::UnknownParent)?;
         // Consider self children without the newly added event (just in case)
-        let parent_self_children: event::SelfChild = parent_event
+        let parent_self_children: event::SelfChild = self_parent
             .children
             .self_child
             .clone()
             .with_child_removed(&event);
         match parent_self_children {
-            event::SelfChild::HonestParent(None) => {
-                // It is a "leaf" in terms of forking, so we just add it to the index
-                // Makes the final check and starts updating the state
-                self.fork_index.push_event(event.clone(), &self_parent)?;
-            }
-            event::SelfChild::HonestParent(Some(firstborn)) => {
-                // It is the second self child, so we creating a new fork
-                let identifier = Self::find_fork_identifier(&self_parent, event_lookup)?;
-                // completing the checks and starting to update the state
-                self.fork_index.add_new_fork(
-                    &identifier,
-                    self_parent,
-                    *parent_height,
-                    event.clone(),
-                    firstborn,
-                )?;
-            }
-            event::SelfChild::ForkingParent(_) => {
-                // Its parent already has forks, so we just add another one
-                let identifier = Self::find_fork_identifier(&self_parent, event_lookup)?;
-                // completing the checks and starting to update the state
-                self.fork_index
-                    .add_branch_to_fork(&identifier, event.clone())
-                    .map_err(|e| <LookupIndexInconsistency>::from(e))?;
+            event::SelfChild::HonestParent(None) => {}
+            event::SelfChild::HonestParent(Some(_)) | event::SelfChild::ForkingParent(_) => {
+                self.fork_index.track_fork(self_parent, event);
             }
         }
-        self.authored_events.insert(event, parent_height + 1);
+        self.authored_events.insert(event, ());
+        self.latest_event = event;
         Ok(())
-    }
-
-    fn find_fork_identifier<'a, F, TPayload>(
-        target: &event::Hash,
-        event_lookup: F,
-    ) -> Result<event::Hash, Error>
-    where
-        F: Fn(&event::Hash) -> Option<&'a event::Event<TPayload>>,
-        TPayload: 'a,
-    {
-        let mut this_event = event_lookup(target).ok_or(Error::InconsistentLookup)?;
-        let mut prev_event = match this_event.parents() {
-            event::Kind::Genesis => return Ok(target.clone()),
-            event::Kind::Regular(parents) => {
-                event_lookup(&parents.self_parent).ok_or(Error::InconsistentLookup)?
-            }
-        };
-        while let event::Kind::Regular(parents) = prev_event.parents() {
-            let prev_self_children: event::SelfChild = prev_event
-                .children
-                .self_child
-                .clone()
-                .with_child_removed(this_event.hash());
-            if let event::SelfChild::ForkingParent(_) = prev_self_children {
-                // `prev_event` has forking children, thus the child is the identifier we want
-                return Ok(this_event.hash().clone());
-            }
-            this_event = prev_event;
-            prev_event = event_lookup(&parents.self_parent).ok_or(Error::InconsistentLookup)?
-        }
-        // `prev_event` is genesis and thus it's the identifier
-        Ok(prev_event.hash().clone())
-    }
-
-    /// Latest events across all known forks of the peer.
-    /// If peer is honest, it will contain a single event
-    pub fn latest_events(&self) -> Vec<&event::Hash> {
-        self.fork_index.leaf_events()
-    }
-
-    pub fn forks<'a>(&'a self) -> ForkIndexIter<'a> {
-        self.fork_index.iter()
-    }
-
-    pub fn forks_submultiple(&self) -> NonZeroU8 {
-        *self.fork_index.submultiple()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
+
+    // Returns the index and all_events tracker
+    fn construct_peer_index<TPayload>(
+        events: &[(event::Event<TPayload>)],
+    ) -> (PeerIndexEntry, HashMap<event::Hash, event::Event<TPayload>>) {
+        let events = events.into_iter();
+        let mut all_events = HashMap::new();
+        let genesis = events.next().expect("event list must be nonempty");
+        all_events.insert(genesis.hash().clone(), *genesis.clone());
+        let mut peer_index = PeerIndexEntry::new(genesis.hash().clone());
+        for event in events {
+            all_events.insert(event.hash().clone(), *event.clone());
+            let self_parent = if let event::Kind::Regular(p) = event.parents() {
+                p.self_parent
+            } else {
+                panic!("2 geneses, can't add to the index");
+            };
+            all_events
+                .get_mut(&self_parent)
+                .unwrap()
+                .children
+                .self_child
+                .add_child(event.hash().clone());
+            peer_index
+                .add_event(
+                    all_events
+                        .get(&self_parent)
+                        .expect("unknown event listed as peer"),
+                    event.hash().clone(),
+                )
+                .unwrap();
+        }
+        (peer_index, all_events)
+    }
 
     use super::*;
     #[test]
@@ -192,7 +140,7 @@ mod tests {
             event::Event::new((), event::Kind::Genesis, peer, start_time.as_secs().into()).unwrap();
         let a_hash = event_a.hash().clone();
         all_events.insert(a_hash.clone(), event_a);
-        let mut index = PeerIndexEntry::new(a_hash.clone(), NonZeroU8::new(3u8).unwrap());
+        let mut index = PeerIndexEntry::new(a_hash.clone());
 
         let event_b = event::Event::new(
             (),
@@ -214,7 +162,7 @@ mod tests {
             .self_child
             .add_child(b_hash.clone());
         index
-            .add_event(a_hash.clone(), b_hash.clone(), |h| all_events.get(h))
+            .add_event(all_events.get(&a_hash).expect("aboba"), b_hash.clone())
             .unwrap();
 
         let event_c = event::Event::new(
@@ -237,7 +185,7 @@ mod tests {
             .self_child
             .add_child(c_hash.clone());
         index
-            .add_event(b_hash.clone(), c_hash.clone(), |h| all_events.get(h))
+            .add_event(all_events.get(&b_hash).expect("akeke"), c_hash.clone())
             .unwrap();
 
         let event_d = event::Event::new(
@@ -260,7 +208,7 @@ mod tests {
             .self_child
             .add_child(d_hash.clone());
         index
-            .add_event(b_hash.clone(), d_hash.clone(), |h| all_events.get(h))
+            .add_event(all_events.get(&b_hash).expect("akeke"), d_hash.clone())
             .unwrap();
 
         let event_e = event::Event::new(
@@ -283,7 +231,7 @@ mod tests {
             .self_child
             .add_child(e_hash.clone());
         index
-            .add_event(b_hash.clone(), e_hash.clone(), |h| all_events.get(h))
+            .add_event(all_events.get(&b_hash).expect("akeke"), e_hash.clone())
             .unwrap();
 
         let event_f = event::Event::new(
@@ -306,7 +254,11 @@ mod tests {
             .self_child
             .add_child(f_hash.clone());
         index
-            .add_event(a_hash.clone(), f_hash.clone(), |h| all_events.get(h))
+            .add_event(all_events.get(&a_hash).expect("akeke"), f_hash.clone())
             .unwrap();
+
+        // check test for correctness
+        let events = vec![event_a, event_b, event_c, event_d, event_e, event_f];
+        let (index_2, all_events_2) = construct_peer_index(&events);
     }
 }
