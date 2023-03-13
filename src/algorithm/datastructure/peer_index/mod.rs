@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use derive_getters::Getters;
 use thiserror::Error;
@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::PeerId;
 
 use self::fork_tracking::ForkIndex;
-use super::{event, EventIndex};
+use super::{event, EventIndex, Graph};
 
 pub mod fork_tracking;
 
@@ -15,6 +15,7 @@ pub type PeerIndex = HashMap<PeerId, PeerIndexEntry>;
 #[derive(Getters)]
 pub struct PeerIndexEntry {
     origin: event::Hash,
+    known_events: HashSet<event::Hash>,
     authored_events: EventIndex<()>,
     /// Forks authored by the peer that we've observed. Forks are events
     /// that have the same `self_parent`.
@@ -29,6 +30,8 @@ pub struct PeerIndexEntry {
 pub enum Error {
     #[error("Attempted to add an event that is already present in the index")]
     EventAlreadyKnown,
+    #[error("Parent of event {0} is unknown")]
+    UnknownParent(event::Hash),
 }
 
 impl PeerIndexEntry {
@@ -36,16 +39,21 @@ impl PeerIndexEntry {
         Self {
             origin: genesis.clone(),
             authored_events: HashMap::from([(genesis.clone(), ())]),
+            known_events: HashSet::from([genesis.clone()]),
             fork_index: ForkIndex::new(),
             latest_event: genesis.clone(),
         }
     }
 
-    pub fn add_event<TPayload>(
+    pub fn add_event<'a, TPayload, F>(
         &mut self,
+        events_in_direct_sight: F,
         self_parent: &event::Event<TPayload>,
         event: event::Hash,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        F: Fn(&event::Hash) -> Option<Vec<&'a event::Hash>>,
+    {
         // First do all checks, only then apply changes, to keep the state consistent
 
         // TODO: represent it in some way in the code. E.g. by creating 2 functions
@@ -56,6 +64,7 @@ impl PeerIndexEntry {
         if self.authored_events.contains_key(&event) {
             return Err(Error::EventAlreadyKnown);
         }
+        self.add_known_events(event.clone(), events_in_direct_sight)?;
         // Consider self children without the newly added event (just in case)
         let parent_self_children: event::SelfChild = self_parent
             .children
@@ -70,6 +79,34 @@ impl PeerIndexEntry {
         }
         self.authored_events.insert(event.clone(), ());
         self.latest_event = event;
+        Ok(())
+    }
+
+    fn add_known_events<'a, F>(
+        &mut self,
+        start: event::Hash,
+        events_in_direct_sight: F,
+    ) -> Result<(), Error>
+    where
+        F: Fn(&event::Hash) -> Option<Vec<&'a event::Hash>>,
+    {
+        if self.known_events.contains(&start) {
+            return Ok(());
+        }
+        let mut to_visit = VecDeque::new();
+        let mut new_known_events = vec![];
+        to_visit.push_back(start);
+        while let Some(next) = to_visit.pop_front() {
+            let new_events =
+                events_in_direct_sight(&next).ok_or(Error::UnknownParent(next.clone()))?;
+            let new_events = new_events
+                .into_iter()
+                .filter(|h| !self.known_events.contains(h))
+                .cloned();
+            to_visit.extend(new_events);
+            new_known_events.push(next.clone());
+        }
+        self.known_events.extend(new_known_events);
         Ok(())
     }
 }
@@ -103,6 +140,7 @@ mod tests {
                 .add_child(event.hash().clone());
             peer_index
                 .add_event(
+                    |_h| Some(vec![]),
                     all_events
                         .get(&self_parent)
                         .expect("unknown event listed as peer"),

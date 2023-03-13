@@ -258,8 +258,25 @@ where
                     .children
                     .self_child
                     .add_child(new_event.hash().clone());
-                if let Err(e) = author_index.add_event(self_parent_event, new_event.hash().clone())
-                {
+                // Borrow checker doesn't want to treat the parameter to add_event
+                // as immutable reference otherwise :(
+                let self_parent_event = self
+                    .all_events
+                    .get(&parents.self_parent)
+                    .expect("Just checked self parent presence");
+                if let Err(e) = author_index.add_event(
+                    |h| {
+                        self.all_events.get(h).map(|e| {
+                            let kind = e.parents();
+                            match kind {
+                                event::Kind::Genesis => vec![],
+                                event::Kind::Regular(p) => vec![&p.self_parent, &p.other_parent],
+                            }
+                        })
+                    },
+                    self_parent_event,
+                    new_event.hash().clone(),
+                ) {
                     warn!("Peer index insertion error: {}", e);
                 }
                 let other_parent_event = self
