@@ -316,7 +316,7 @@ fn add_events<T, TIter>(
         HashMap<String, PeerEvents>,
         HashMap<event::Hash, String>, // hash -> event_name
     ),
-    PushError,
+    String,
 >
 where
     T: Serialize + Copy + Default + Eq + Hash,
@@ -359,7 +359,7 @@ fn add_events_with_timestamps<T, TIter>(
         HashMap<String, PeerEvents>,
         HashMap<event::Hash, String>, // hash -> event_name
     ),
-    PushError,
+    String,
 >
 where
     T: Serialize + Copy + Default + Eq + Hash,
@@ -438,14 +438,16 @@ where
             self_parent: self_parent_event_hash.clone(),
             other_parent: other_parent_event_hash.clone(),
         };
-        let new_event_hash = graph.push_event(
-            payload.next().expect("Iterator finished"),
-            EventKind::Regular(parents),
-            *author_id,
-            *timestamps
-                .get(event_name)
-                .expect(&format!("No timestamp for event {}", event_name)),
-        )?;
+        let new_event_hash = graph
+            .push_event(
+                payload.next().expect("Iterator finished"),
+                EventKind::Regular(parents),
+                *author_id,
+                *timestamps
+                    .get(event_name)
+                    .expect(&format!("No timestamp for event {}", event_name)),
+            )
+            .map_err(|e| format!("Failer to push event {}: {}", event_name, e))?;
         peers_events
             .get_mut(&author)
             .expect(&format!("Author '{}' should be in the index", author))
@@ -486,13 +488,14 @@ where
     Ok(names)
 }
 
-fn build_graph_from_paper<T>(payload: T, coin_frequency: usize) -> Result<TestSetup<T>, PushError>
+fn build_graph_from_paper<T>(payload: T, coin_frequency: usize) -> Result<TestSetup<T>, String>
 where
     T: Serialize + Copy + Default + Eq + Hash,
 {
     let author_ids = HashMap::from([("a", 0), ("b", 1), ("c", 2), ("d", 3), ("e", 4)]);
     let mut graph = Graph::new(*author_ids.get("a").unwrap(), payload, 0, coin_frequency);
-    let mut names = add_geneses(&mut graph, "a", &author_ids, payload)?;
+    let mut names =
+        add_geneses(&mut graph, "a", &author_ids, payload).map_err(|e| format!("{}", e))?;
     let events = [
         //  (name, peer, other_parent)
         ("c2", "c", "d"),
@@ -507,8 +510,9 @@ where
         ("c5", "c", "e2"), // ???
         ("c6", "c", "a3"),
     ];
+    let timestamps = events.iter().zip(0..).map(|(a, b)| (a.0, b)).collect();
     let (peers_events, new_names) =
-        add_events(&mut graph, &events, author_ids, &mut repeat(payload))?;
+        add_events_with_timestamps(&mut graph, &events, author_ids, &mut repeat(payload), timestamps)?;
     names.extend(new_names);
     Ok(TestSetup {
         graph,
@@ -518,7 +522,7 @@ where
     })
 }
 
-fn build_graph_some_chain<T>(payload: T, coin_frequency: usize) -> Result<TestSetup<T>, PushError>
+fn build_graph_some_chain<T>(payload: T, coin_frequency: usize) -> Result<TestSetup<T>, String>
 where
     T: Serialize + Copy + Default + Eq + Hash,
 {
@@ -535,7 +539,8 @@ where
     */
     let author_ids = HashMap::from([("g1", 0), ("g2", 1), ("g3", 2)]);
     let mut graph = Graph::new(*author_ids.get("g1").unwrap(), payload, 0, coin_frequency);
-    let mut names = add_geneses(&mut graph, "g1", &author_ids, payload)?;
+    let mut names =
+        add_geneses(&mut graph, "g1", &author_ids, payload).map_err(|e| format!("{}", e))?;
     let events = [
         //  (name, peer, other_parent)
         ("e1", "g1", "g2"),
@@ -560,7 +565,7 @@ where
 fn build_graph_detailed_example<T>(
     payload: T,
     coin_frequency: usize,
-) -> Result<TestSetup<T>, PushError>
+) -> Result<TestSetup<T>, String>
 where
     T: Serialize + Copy + Default + Eq + Hash,
 {
@@ -571,7 +576,7 @@ fn build_graph_detailed_example_with_timestamps<T, TIter>(
     payload: T,
     coin_frequency: usize,
     mut timestamp_generator: TIter,
-) -> Result<TestSetup<T>, PushError>
+) -> Result<TestSetup<T>, String>
 where
     T: Serialize + Copy + Default + Eq + Hash,
     TIter: Iterator<Item = Timestamp>,
@@ -582,7 +587,8 @@ where
 
     let author_ids = HashMap::from([("a", 0), ("b", 1), ("c", 2), ("d", 3)]);
     let mut graph = Graph::new(*author_ids.get("a").unwrap(), payload, 0, coin_frequency);
-    let mut names = add_geneses(&mut graph, "a", &author_ids, payload)?;
+    let mut names =
+        add_geneses(&mut graph, "a", &author_ids, payload).map_err(|e| format!("{}", e))?;
     // resources/graph_example.png for reference
     let events = [
         //  (name,  peer, other_parent)
@@ -650,7 +656,7 @@ where
 fn build_graph_fork<T, TIter>(
     mut payload: TIter,
     coin_frequency: usize,
-) -> Result<TestSetup<T>, PushError>
+) -> Result<TestSetup<T>, String>
 where
     T: Serialize + Copy + Default + Eq + Hash,
     TIter: Iterator<Item = T>,
@@ -670,7 +676,8 @@ where
         "a",
         &author_ids,
         payload.next().expect("Iterator finished"),
-    )?;
+    )
+    .map_err(|e| format!("{}", e))?;
     let events = [
         //  (name,  peer, other_parent)
         // round 1
@@ -697,7 +704,7 @@ where
     })
 }
 
-fn build_graph_index_test<T>(payload: T, coin_frequency: usize) -> Result<TestSetup<T>, PushError>
+fn build_graph_index_test<T>(payload: T, coin_frequency: usize) -> Result<TestSetup<T>, String>
 where
     T: Serialize + Copy + Default + Eq + Hash,
 {
@@ -705,7 +712,8 @@ where
     // this should fail with existing impl.
     let author_ids = HashMap::from([("a", 0), ("b", 1), ("c", 2), ("d", 3)]);
     let mut graph = Graph::new(*author_ids.get("b").unwrap(), payload, 0, coin_frequency);
-    let mut names = add_geneses(&mut graph, "b", &author_ids, payload)?;
+    let mut names =
+        add_geneses(&mut graph, "b", &author_ids, payload).map_err(|e| format!("{}", e))?;
     // resources/graph_example.png for reference
     let events = [
         //  (name,  peer, other_parent)
