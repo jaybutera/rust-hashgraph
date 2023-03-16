@@ -156,6 +156,7 @@ impl From<Vec<Hash>> for SelfChild {
 #[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
 pub struct Parents {
     pub self_parent: Hash,
+    // TODO: check that can be same as `self_parent` or allow none
     pub other_parent: Hash,
 }
 

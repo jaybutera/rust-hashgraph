@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::PeerId;
 
 use self::fork_tracking::ForkIndex;
-use super::{event, EventIndex, Graph};
+use super::{event, EventIndex};
 
 pub mod fork_tracking;
 
@@ -30,8 +30,8 @@ pub struct PeerIndexEntry {
 pub enum Error {
     #[error("Attempted to add an event that is already present in the index")]
     EventAlreadyKnown,
-    #[error("Parent of event {0} is unknown")]
-    UnknownParent(event::Hash),
+    #[error("Event {0} is unknown")]
+    UnknownEvent(event::Hash),
 }
 
 impl PeerIndexEntry {
@@ -47,10 +47,15 @@ impl PeerIndexEntry {
 
     /// Add event to the index. The added event should have all ancestors added
     /// before.
+    ///
+    /// `events_in_direct_sight` should return Some(_) when the queried hash is known
+    /// and None if unknown (should not happen on consistent graph). It may not know
+    /// about `event` yet though.
     pub fn add_event<'a, TPayload, F>(
         &mut self,
         events_in_direct_sight: F,
         self_parent: &event::Event<TPayload>,
+        other_parent: event::Hash,
         event: event::Hash,
     ) -> Result<(), Error>
     where
@@ -66,7 +71,12 @@ impl PeerIndexEntry {
         if self.authored_events.contains_key(&event) {
             return Err(Error::EventAlreadyKnown);
         }
-        self.add_known_events(event.clone(), events_in_direct_sight)?;
+        // `event` itself is unknown to `events_in_direct_sight` yet, so we start from its
+        // parents
+        self.add_known_events(
+            vec![self_parent.hash().clone(), other_parent],
+            events_in_direct_sight,
+        )?;
         // Consider self children without the newly added event (just in case)
         let parent_self_children: event::SelfChild = self_parent
             .children
@@ -89,23 +99,27 @@ impl PeerIndexEntry {
     /// Update `known_events` index to include newly-seen events by the peer. It should
     /// help to always have the relevant list of events the peer sees and not recompute
     /// it on demand.
+    ///
+    /// `events_in_direct_sight` should return Some(_) when the queried hash is known
+    /// and None if unknown (should not happen on consistent graph)
     fn add_known_events<'a, F>(
         &mut self,
-        start: event::Hash,
+        start: Vec<event::Hash>,
         events_in_direct_sight: F,
     ) -> Result<(), Error>
     where
         F: Fn(&event::Hash) -> Option<Vec<&'a event::Hash>>,
     {
-        if self.known_events.contains(&start) {
+        if start.iter().all(|s| self.known_events.contains(s)) {
             return Ok(());
         }
-        let mut to_visit = VecDeque::new();
+        let mut to_visit = VecDeque::from(start);
+        // Add them after traversal. To not to leave the index in potentially incorrect
+        // state in case error happens.
         let mut new_known_events = vec![];
-        to_visit.push_back(start);
         while let Some(next) = to_visit.pop_front() {
             let new_events =
-                events_in_direct_sight(&next).ok_or(Error::UnknownParent(next.clone()))?;
+                events_in_direct_sight(&next).ok_or(Error::UnknownEvent(next.clone()))?;
             let new_events = new_events
                 .into_iter()
                 .filter(|h| !self.known_events.contains(h))
@@ -134,8 +148,8 @@ mod tests {
         let mut peer_index = PeerIndexEntry::new(genesis.hash().clone());
         for event in events {
             all_events.insert(event.hash().clone(), event.clone());
-            let self_parent = if let event::Kind::Regular(p) = event.parents() {
-                p.self_parent.clone()
+            let (self_parent, other_parent) = if let event::Kind::Regular(p) = event.parents() {
+                (p.self_parent.clone(), p.other_parent.clone())
             } else {
                 panic!("2 geneses, can't add to the index");
             };
@@ -151,6 +165,7 @@ mod tests {
                     all_events
                         .get(&self_parent)
                         .expect("unknown event listed as peer"),
+                    other_parent,
                     event.hash().clone(),
                 )
                 .unwrap();

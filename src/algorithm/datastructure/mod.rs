@@ -275,6 +275,7 @@ where
                         })
                     },
                     self_parent_event,
+                    parents.other_parent.clone(),
                     new_event.hash().clone(),
                 ) {
                     warn!("Peer index insertion error: {}", e);
