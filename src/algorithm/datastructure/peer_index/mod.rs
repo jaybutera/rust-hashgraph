@@ -45,6 +45,8 @@ impl PeerIndexEntry {
         }
     }
 
+    /// Add event to the index. The added event should have all ancestors added
+    /// before.
     pub fn add_event<'a, TPayload, F>(
         &mut self,
         events_in_direct_sight: F,
@@ -84,6 +86,9 @@ impl PeerIndexEntry {
         Ok(())
     }
 
+    /// Update `known_events` index to include newly-seen events by the peer. It should
+    /// help to always have the relevant list of events the peer sees and not recompute
+    /// it on demand.
     fn add_known_events<'a, F>(
         &mut self,
         start: event::Hash,

@@ -4,8 +4,6 @@ use std::{
     ops::Deref,
 };
 
-use test_log::test;
-
 use super::*;
 /// Filter for `tracing_subscriber` that passes all messages from the given function.
 /// Should be useful for debugging test cases (actually was at least once).
@@ -773,6 +771,7 @@ where
 
 #[test]
 fn graph_builds() {
+    tracing_subscriber::fmt::init();
     build_graph_from_paper((), 999).unwrap();
     build_graph_some_chain((), 999).unwrap();
     build_graph_detailed_example((), 999).unwrap();
