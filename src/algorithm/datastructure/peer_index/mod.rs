@@ -262,9 +262,11 @@ mod tests {
             &authored_events_expected,
             "authored events not tracked correctly"
         );
-        assert_eq!(
-            index_2.latest_events().iter().next().unwrap(),
-            events.last().unwrap().hash()
+        assert!(
+            index_2
+                .latest_events()
+                .contains(events.last().unwrap().hash()),
+            "Latest event is not tracked as tip"
         );
         assert_eq!(index_2.origin(), events.first().unwrap().hash());
         let forks_expected = HashMap::<_, _>::from_iter([
