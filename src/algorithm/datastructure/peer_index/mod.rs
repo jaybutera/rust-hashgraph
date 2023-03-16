@@ -23,7 +23,7 @@ pub struct PeerIndexEntry {
     /// Represented by event hashes that have multiple self children
     /// (children authored by the same peer)
     fork_index: ForkIndex,
-    latest_event: event::Hash,
+    latest_events: HashSet<event::Hash>,
 }
 
 #[derive(Debug, Error, PartialEq)]
@@ -41,7 +41,7 @@ impl PeerIndexEntry {
             authored_events: HashMap::from([(genesis.clone(), ())]),
             known_events: HashSet::from([genesis.clone()]),
             fork_index: ForkIndex::new(),
-            latest_event: genesis.clone(),
+            latest_events: HashSet::from_iter([genesis.clone()].into_iter()),
         }
     }
 
@@ -72,13 +72,15 @@ impl PeerIndexEntry {
             .clone()
             .with_child_removed(&event);
         match parent_self_children {
-            event::SelfChild::HonestParent(None) => {}
+            event::SelfChild::HonestParent(None) => {
+                self.latest_events.remove(self_parent.hash());
+            }
             event::SelfChild::HonestParent(Some(_)) | event::SelfChild::ForkingParent(_) => {
                 self.fork_index.track_fork(self_parent, event.clone());
             }
         }
         self.authored_events.insert(event.clone(), ());
-        self.latest_event = event;
+        self.latest_events.insert(event);
         Ok(())
     }
 
@@ -240,7 +242,10 @@ mod tests {
             &authored_events_expected,
             "authored events not tracked correctly"
         );
-        assert_eq!(index_2.latest_event(), events.last().unwrap().hash());
+        assert_eq!(
+            index_2.latest_events().iter().next().unwrap(),
+            events.last().unwrap().hash()
+        );
         assert_eq!(index_2.origin(), events.first().unwrap().hash());
         let forks_expected = HashMap::<_, _>::from_iter([
             (

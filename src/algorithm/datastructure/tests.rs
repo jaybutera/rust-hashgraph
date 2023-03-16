@@ -4,6 +4,8 @@ use std::{
     ops::Deref,
 };
 
+use test_log::test;
+
 use super::*;
 /// Filter for `tracing_subscriber` that passes all messages from the given function.
 /// Should be useful for debugging test cases (actually was at least once).
@@ -366,6 +368,16 @@ where
     TIter: Iterator<Item = T>,
 {
     let mut inserted_events = HashMap::with_capacity(events.len());
+    for (peer_name, peer_id) in &author_ids {
+        let key = format!("GENESIS_{}", peer_name).to_owned();
+        inserted_events.insert(
+            key,
+            graph
+                .peer_genesis(&peer_id)
+                .expect(&format!("Incorrect peer id: {}", peer_id))
+                .clone(),
+        );
+    }
     let mut peers_events: HashMap<String, PeerEvents> = author_ids
         .keys()
         .map(|&name| {
@@ -386,11 +398,11 @@ where
         })
         .collect();
 
-    for &(event_name, creator, other_parent_event) in events {
+    for &(event_name, self_parent_str, other_parent_event) in events {
         let other_parent_event_hash = match author_ids.get(other_parent_event) {
             Some(h) => graph.peer_genesis(h).expect(&format!(
                 "Unknown peer id {} to graph (name '{}')",
-                h, creator
+                h, self_parent_str
             )),
             None => inserted_events
                 .get(other_parent_event)
@@ -398,12 +410,13 @@ where
         };
         let genesis_prefix = "GENESIS_";
         let (self_parent_event_hash, author_id, author) = match (
-            creator.starts_with(genesis_prefix),
-            inserted_events.get(creator),
-            author_ids.get(creator),
+            self_parent_str.starts_with(genesis_prefix),
+            inserted_events.get(self_parent_str),
+            author_ids.get(self_parent_str),
         ) {
+            // `self_parent_str` has form `GENESIS_{author_name}`; genesis is self_parent.
             (true, _, _) => {
-                let author_name = creator.trim_start_matches(genesis_prefix);
+                let author_name = self_parent_str.trim_start_matches(genesis_prefix);
                 let author_id = author_ids
                     .get(author_name)
                     .expect(&format!("Unknown author name '{}'", author_name));
@@ -411,29 +424,44 @@ where
                     "Unknown author id of '{}': {}",
                     author_name, author_id
                 ));
-                let author = creator.trim_start_matches(genesis_prefix).to_owned();
-                (self_parent, author_id, author)
+                let author_name = self_parent_str
+                    .trim_start_matches(genesis_prefix)
+                    .to_owned();
+                (self_parent, author_id, author_name)
             }
-            (false, Some(event), _) => {
-                let event = graph.event(event).expect("Just inserted the event");
-                let author = author_ids
+            // `self_parent_str` is a name of previously inserted event; it is the self parent.
+            (false, Some(self_parent_hash), _) => {
+                let self_parent_event = graph
+                    .event(self_parent_hash)
+                    .expect("Just inserted the event");
+                let author_name = author_ids
                     .iter()
-                    .find(|(_name, id)| id == &event.author())
+                    .find(|(_name, id)| id == &self_parent_event.author())
                     .expect("Just inserted the event, should be tracked")
                     .0
                     .deref()
                     .to_owned();
-                (event.hash(), event.author(), author)
+                (self_parent_hash, self_parent_event.author(), author_name)
             }
-            (false, None, Some(author_id)) => (
+            // `self_parent_str` is a name of peer; latest event of the peer is self parent.
+            (false, None, Some(self_parent_author_id)) => (
                 graph
-                    .peer_latest_event(author_id)
-                    .expect(&format!("Unknown event author {}", creator)),
-                author_id,
-                creator.to_owned(),
+                    .peer_latest_event(self_parent_author_id)
+                    .expect(&format!("Unknown event author {}", self_parent_str)),
+                self_parent_author_id,
+                self_parent_str.to_owned(),
             ),
-            (false, None, None) => panic!("Could not recognize creator '{}'", creator),
+            (false, None, None) => panic!("Could not recognize creator '{}'", self_parent_str),
         };
+        println!("self_parent: {:?}", self_parent_event_hash);
+        println!(
+            "name: {}\n",
+            inserted_events
+                .iter()
+                .find(|a| a.1 == self_parent_event_hash)
+                .unwrap()
+                .0
+        );
         let parents = Parents {
             self_parent: self_parent_event_hash.clone(),
             other_parent: other_parent_event_hash.clone(),
@@ -510,9 +538,9 @@ where
         ("c5", "c", "e2"), // ???
         ("c6", "c", "a3"),
     ];
-    let timestamps = events.iter().zip(0..).map(|(a, b)| (a.0, b)).collect();
+    // let timestamps = events.iter().zip(0..).map(|(a, b)| (a.0, b)).collect();
     let (peers_events, new_names) =
-        add_events_with_timestamps(&mut graph, &events, author_ids, &mut repeat(payload), timestamps)?;
+        add_events(&mut graph, &events, author_ids, &mut repeat(payload))?;
     names.extend(new_names);
     Ok(TestSetup {
         graph,

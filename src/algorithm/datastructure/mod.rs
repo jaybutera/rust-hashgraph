@@ -535,7 +535,13 @@ where
             let mut extension = vec![];
             for (peer_id, index) in &self.peer_index {
                 if !peers_hit.contains(&peer_id) {
-                    extension.push(index.latest_event());
+                    extension.push(
+                        index
+                            .latest_events()
+                            .iter()
+                            .next()
+                            .expect("At least single latest event should be present"),
+                    );
                 }
             }
             trace!(
@@ -599,7 +605,12 @@ impl<TPayload> Graph<TPayload> {
 
     // for navigating the graph state externally
     pub fn peer_latest_event(&self, peer: &PeerId) -> Option<&event::Hash> {
-        self.peer_index.get(peer).map(|e| e.latest_event())
+        self.peer_index.get(peer).map(|e| {
+            e.latest_events()
+                .iter()
+                .next()
+                .expect("At least single latest event should be present")
+        })
     }
 
     // for navigating the graph state externally
