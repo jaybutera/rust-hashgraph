@@ -319,7 +319,7 @@ fn add_events<T, TIter>(
     String,
 >
 where
-    T: Serialize + Copy + Default + Eq + Hash,
+    T: Serialize + Copy + Default + Eq + Hash + Debug,
     TIter: Iterator<Item = T>,
 {
     let timestamps = events.iter().map(|&(name, _, _)| (name, 0)).collect();
@@ -362,7 +362,7 @@ fn add_events_with_timestamps<T, TIter>(
     String,
 >
 where
-    T: Serialize + Copy + Default + Eq + Hash,
+    T: Serialize + Copy + Default + Eq + Hash + Debug,
     TIter: Iterator<Item = T>,
 {
     let mut inserted_events = HashMap::with_capacity(events.len());
@@ -466,12 +466,15 @@ where
         };
         let new_event_hash = graph
             .push_event(
-                payload.next().expect("Iterator finished"),
-                EventKind::Regular(parents),
-                *author_id,
-                *timestamps
-                    .get(event_name)
-                    .expect(&format!("No timestamp for event {}", event_name)),
+                Event::new_unsigned(
+                    payload.next().expect("Iterator finished"),
+                    event::Kind::Regular(parents),
+                    *author_id,
+                    *timestamps
+                        .get(event_name)
+                        .expect(&format!("No timestamp for event {}", event_name)),
+                )
+                .expect("Failed to create event"),
             )
             .map_err(|e| format!("Failer to push event {}: {}", event_name, e))?;
         peers_events
@@ -495,7 +498,7 @@ fn add_geneses<T>(
     payload: T,
 ) -> Result<HashMap<event::Hash, String>, PushError>
 where
-    T: Serialize + Copy + Eq + Hash,
+    T: Serialize + Copy + Eq + Hash + Debug,
 {
     let mut names = HashMap::with_capacity(author_ids.len());
 
@@ -507,7 +510,10 @@ where
                 .clone()
         } else {
             // Geneses must not have timestamp 0, but why not do it for testing other components
-            graph.push_event(payload, EventKind::Genesis, *id, 0)?
+            graph.push_event(
+                Event::new_unsigned(payload, event::Kind::Genesis, *id, 0)
+                    .expect("Failed to create event"),
+            )?
         };
         names.insert(hash, name.to_owned());
     }
@@ -516,7 +522,7 @@ where
 
 fn build_graph_from_paper<T>(payload: T, coin_frequency: usize) -> Result<TestSetup<T>, String>
 where
-    T: Serialize + Copy + Default + Eq + Hash,
+    T: Serialize + Copy + Default + Eq + Hash + Debug,
 {
     let author_ids = HashMap::from([("a", 0), ("b", 1), ("c", 2), ("d", 3), ("e", 4)]);
     let mut graph = Graph::new(*author_ids.get("a").unwrap(), payload, 0, coin_frequency);
@@ -550,7 +556,7 @@ where
 
 fn build_graph_some_chain<T>(payload: T, coin_frequency: usize) -> Result<TestSetup<T>, String>
 where
-    T: Serialize + Copy + Default + Eq + Hash,
+    T: Serialize + Copy + Default + Eq + Hash + Debug,
 {
     /* Generates the following graph for each member (c1,c2,c3)
      *
@@ -593,7 +599,7 @@ fn build_graph_detailed_example<T>(
     coin_frequency: usize,
 ) -> Result<TestSetup<T>, String>
 where
-    T: Serialize + Copy + Default + Eq + Hash,
+    T: Serialize + Copy + Default + Eq + Hash + Debug,
 {
     build_graph_detailed_example_with_timestamps(payload, coin_frequency, repeat(0))
 }
@@ -604,7 +610,7 @@ fn build_graph_detailed_example_with_timestamps<T, TIter>(
     mut timestamp_generator: TIter,
 ) -> Result<TestSetup<T>, String>
 where
-    T: Serialize + Copy + Default + Eq + Hash,
+    T: Serialize + Copy + Default + Eq + Hash + Debug,
     TIter: Iterator<Item = Timestamp>,
 {
     // Defines graph from paper HASHGRAPH CONSENSUS: DETAILED EXAMPLES
@@ -684,7 +690,7 @@ fn build_graph_fork<T, TIter>(
     coin_frequency: usize,
 ) -> Result<TestSetup<T>, String>
 where
-    T: Serialize + Copy + Default + Eq + Hash,
+    T: Serialize + Copy + Default + Eq + Hash + Debug,
     TIter: Iterator<Item = T>,
 {
     // Graph to test fork handling
@@ -732,7 +738,7 @@ where
 
 fn build_graph_index_test<T>(payload: T, coin_frequency: usize) -> Result<TestSetup<T>, String>
 where
-    T: Serialize + Copy + Default + Eq + Hash,
+    T: Serialize + Copy + Default + Eq + Hash + Debug,
 {
     // Graph to test round_index assignment. It seems that the logic is broken slightly,
     // this should fail with existing impl.
@@ -788,7 +794,7 @@ fn duplicate_push_fails() {
     } = build_graph_from_paper((), 999).unwrap();
     let a_id = peers.get("a").unwrap().id;
     assert!(matches!(
-        graph.push_event((), EventKind::Genesis, a_id, 0),
+        graph.push_event(Event::new_unsigned((), event::Kind::Genesis, a_id, 0).expect("Failed to create event")),
         Err(PushError::EventAlreadyExists(hash)) if &hash == graph.peer_genesis(&a_id).unwrap()
     ));
 }
@@ -802,7 +808,10 @@ fn double_genesis_fails() {
         setup_name: _,
     } = build_graph_from_paper(0, 999).unwrap();
     assert!(matches!(
-        graph.push_event(1, EventKind::Genesis, peers.get("a").unwrap().id, 0),
+        graph.push_event(
+            Event::new_unsigned(1, event::Kind::Genesis, peers.get("a").unwrap().id, 0)
+                .expect("Failed to create event")
+        ),
         Err(PushError::GenesisAlreadyExists)
     ))
 }
@@ -815,25 +824,25 @@ fn missing_parent_fails() {
         names: _,
         setup_name: _,
     } = build_graph_from_paper((), 999).unwrap();
-    let fake_event = EventWrapper::new((), event::Kind::Genesis, 1232423, 123).unwrap();
+    let fake_event = EventWrapper::new_unsigned((), event::Kind::Genesis, 1232423, 123).unwrap();
     let legit_event_hash = graph.peer_latest_event(&0).unwrap().clone();
 
     let fake_parents_1 = Parents {
-        self_parent: fake_event.hash().clone(),
+        self_parent: fake_event.inner().identifier().clone(),
         other_parent: legit_event_hash.clone(),
     };
     assert!(matches!(
-        graph.push_event((), EventKind::Regular(fake_parents_1), peers.get("a").unwrap().id, 0),
-        Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_event.hash()
+        graph.push_event(Event::new_unsigned((), event::Kind::Regular(fake_parents_1), peers.get("a").unwrap().id, 0).expect("Failed to create event")),
+        Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_event.inner().identifier()
     ));
 
     let fake_parents_2 = Parents {
         self_parent: legit_event_hash.clone(),
-        other_parent: fake_event.hash().clone(),
+        other_parent: fake_event.inner().identifier().clone(),
     };
     assert!(matches!(
-        graph.push_event((), EventKind::Regular(fake_parents_2), peers.get("a").unwrap().id, 0),
-        Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_event.hash()
+        graph.push_event(Event::new_unsigned((), event::Kind::Regular(fake_parents_2), peers.get("a").unwrap().id, 0).expect("Failed to create event")),
+        Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_event.inner().identifier()
     ));
 }
 
@@ -1000,7 +1009,8 @@ fn test_ancestor_iter() {
         ),
     ];
     for (iter, ancestors) in cases {
-        let ancestors_from_iter = HashSet::<_>::from_iter(iter.map(|e| e.hash().clone()));
+        let ancestors_from_iter =
+            HashSet::<_>::from_iter(iter.map(|e| e.inner().identifier().clone()));
         assert_eq!(
             ancestors,
             ancestors_from_iter,

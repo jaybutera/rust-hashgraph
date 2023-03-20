@@ -74,7 +74,7 @@ impl PeerIndexEntry {
         // `event` itself is unknown to `events_in_direct_sight` yet, so we start from its
         // parents
         self.add_known_events(
-            vec![self_parent.hash().clone(), other_parent],
+            vec![self_parent.inner().identifier().clone(), other_parent],
             events_in_direct_sight,
         )?;
         // Consider self children without the newly added event (just in case)
@@ -85,7 +85,7 @@ impl PeerIndexEntry {
             .with_child_removed(&event);
         match parent_self_children {
             event::SelfChild::HonestParent(None) => {
-                self.latest_events.remove(self_parent.hash());
+                self.latest_events.remove(self_parent.inner().identifier());
             }
             event::SelfChild::HonestParent(Some(_)) | event::SelfChild::ForkingParent(_) => {
                 self.fork_index.track_fork(self_parent, event.clone());
@@ -147,10 +147,10 @@ mod tests {
         let mut events = events.into_iter();
         let mut all_events: HashMap<event::Hash, event::EventWrapper<TPayload>> = HashMap::new();
         let genesis = events.next().expect("event list must be nonempty");
-        all_events.insert(genesis.hash().clone(), genesis.clone());
-        let mut peer_index = PeerIndexEntry::new(genesis.hash().clone());
+        all_events.insert(genesis.inner().identifier().clone(), genesis.clone());
+        let mut peer_index = PeerIndexEntry::new(genesis.inner().identifier().clone());
         for event in events {
-            all_events.insert(event.hash().clone(), event.clone());
+            all_events.insert(event.inner().identifier().clone(), event.clone());
             let (self_parent, other_parent) = if let event::Kind::Regular(p) = event.parents() {
                 (p.self_parent.clone(), p.other_parent.clone())
             } else {
@@ -161,7 +161,7 @@ mod tests {
                 .unwrap()
                 .children
                 .self_child
-                .add_child(event.hash().clone());
+                .add_child(event.inner().identifier().clone());
             peer_index
                 .add_event(
                     |_h| Some(vec![]),
@@ -169,7 +169,7 @@ mod tests {
                         .get(&self_parent)
                         .expect("unknown event listed as peer"),
                     other_parent,
-                    event.hash().clone(),
+                    event.inner().identifier().clone(),
                 )
                 .unwrap();
         }
@@ -189,12 +189,16 @@ mod tests {
         let start_time = Duration::from_secs(0);
 
         // Since we work with actual events, we can't use our sample hashes.
-        let event_a =
-            event::EventWrapper::new((), event::Kind::Genesis, peer, start_time.as_secs().into())
-                .unwrap();
-        let a_hash = event_a.hash().clone();
+        let event_a = event::EventWrapper::new_unsigned(
+            (),
+            event::Kind::Genesis,
+            peer,
+            start_time.as_secs().into(),
+        )
+        .unwrap();
+        let a_hash = event_a.inner().identifier().clone();
 
-        let event_b = event::EventWrapper::new(
+        let event_b = event::EventWrapper::new_unsigned(
             (),
             event::Kind::Regular(event::Parents {
                 self_parent: a_hash.clone(),
@@ -205,9 +209,9 @@ mod tests {
             (start_time + Duration::from_secs(1)).as_secs().into(),
         )
         .unwrap();
-        let b_hash = event_b.hash().clone();
+        let b_hash = event_b.inner().identifier().clone();
 
-        let event_c = event::EventWrapper::new(
+        let event_c = event::EventWrapper::new_unsigned(
             (),
             event::Kind::Regular(event::Parents {
                 self_parent: b_hash.clone(),
@@ -219,7 +223,7 @@ mod tests {
         )
         .unwrap();
 
-        let event_d = event::EventWrapper::new(
+        let event_d = event::EventWrapper::new_unsigned(
             (),
             event::Kind::Regular(event::Parents {
                 self_parent: b_hash.clone(),
@@ -231,7 +235,7 @@ mod tests {
         )
         .unwrap();
 
-        let event_e = event::EventWrapper::new(
+        let event_e = event::EventWrapper::new_unsigned(
             (),
             event::Kind::Regular(event::Parents {
                 self_parent: b_hash.clone(),
@@ -243,7 +247,7 @@ mod tests {
         )
         .unwrap();
 
-        let event_f = event::EventWrapper::new(
+        let event_f = event::EventWrapper::new_unsigned(
             (),
             event::Kind::Regular(event::Parents {
                 self_parent: a_hash.clone(),
@@ -260,7 +264,7 @@ mod tests {
         let (index_2, _all_events_2) = construct_peer_index(&events);
 
         let authored_events_expected =
-            HashMap::<_, _>::from_iter(events.iter().map(|e| (e.hash().clone(), ())));
+            HashMap::<_, _>::from_iter(events.iter().map(|e| (e.inner().identifier().clone(), ())));
         assert_eq!(
             index_2.authored_events(),
             &authored_events_expected,
@@ -270,25 +274,39 @@ mod tests {
             assert!(latest.contains(event), "Event is not tracked as tip");
         }
         // f
-        assert_latest(&index_2.latest_events, events[5].hash());
+        assert_latest(&index_2.latest_events, events[5].inner().identifier());
         // e
-        assert_latest(&index_2.latest_events, events[4].hash());
+        assert_latest(&index_2.latest_events, events[4].inner().identifier());
         // c
-        assert_latest(&index_2.latest_events, events[2].hash());
+        assert_latest(&index_2.latest_events, events[2].inner().identifier());
         // d
-        assert_latest(&index_2.latest_events, events[3].hash());
-        assert_eq!(index_2.origin(), events.first().unwrap().hash());
+        assert_latest(&index_2.latest_events, events[3].inner().identifier());
+        assert_eq!(
+            index_2.origin(),
+            events.first().unwrap().inner().identifier()
+        );
         let forks_expected = HashMap::<_, _>::from_iter([
             (
-                events[0].hash().clone(),
-                HashSet::<_>::from_iter([events[1].hash(), events[5].hash()].into_iter().cloned()),
+                events[0].inner().identifier().clone(),
+                HashSet::<_>::from_iter(
+                    [
+                        events[1].inner().identifier(),
+                        events[5].inner().identifier(),
+                    ]
+                    .into_iter()
+                    .cloned(),
+                ),
             ),
             (
-                events[1].hash().clone(),
+                events[1].inner().identifier().clone(),
                 HashSet::<_>::from_iter(
-                    [events[2].hash(), events[3].hash(), events[4].hash()]
-                        .into_iter()
-                        .cloned(),
+                    [
+                        events[2].inner().identifier(),
+                        events[3].inner().identifier(),
+                        events[4].inner().identifier(),
+                    ]
+                    .into_iter()
+                    .cloned(),
                 ),
             ),
         ]);

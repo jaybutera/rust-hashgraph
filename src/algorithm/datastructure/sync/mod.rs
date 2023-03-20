@@ -1,6 +1,6 @@
 use crate::algorithm::event;
 
-struct Jobs<TPayload> {
+pub struct Jobs<TPayload> {
     inner: Vec<event::Event<TPayload>>,
 }
 

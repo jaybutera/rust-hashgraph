@@ -4,11 +4,12 @@ use thiserror::Error;
 use tracing::{debug, error, instrument, trace, warn};
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt::Debug;
 
 use self::ordering::OrderedEvents;
 use self::peer_index::{PeerIndex, PeerIndexEntry};
 use self::slice::SliceIterator;
-use super::event::{self, EventWrapper, Parents};
+use super::event::{self, Event, EventWrapper, Parents};
 use super::{EventKind, PushError, RoundNum};
 use crate::{PeerId, Timestamp};
 
@@ -133,7 +134,7 @@ pub struct Graph<TPayload> {
 
 impl<TPayload> Graph<TPayload>
 where
-    TPayload: Serialize + Eq + std::hash::Hash,
+    TPayload: Serialize + Eq + std::hash::Hash + Debug,
 {
     pub fn new(
         self_id: PeerId,
@@ -156,10 +157,14 @@ where
 
         graph
             .push_event(
-                genesis_payload,
-                EventKind::Genesis,
-                self_id,
-                genesis_timestamp,
+                Event::new(
+                    genesis_payload,
+                    event::Kind::Genesis,
+                    self_id,
+                    genesis_timestamp,
+                    todo!(),
+                )
+                .expect("Invalid own genesis, can't start consensus"),
             )
             .expect("Genesis events should be valid");
         graph
@@ -168,52 +173,36 @@ where
     /// Create and push event to the graph, adding it at the end of `author`'s lane
     /// (i.e. the event becomes the latest one of the peer).
     #[instrument(level = "error", skip_all)]
-    #[instrument(level = "trace", skip(self, payload))]
-    pub fn push_event(
-        &mut self,
-        payload: TPayload,
-        event_type: EventKind,
-        author: PeerId,
-        time_created: Timestamp,
-    ) -> Result<event::Hash, PushError> {
+    #[instrument(level = "trace", skip(self))]
+    pub fn push_event(&mut self, event: Event<TPayload>) -> Result<event::Hash, PushError>
+    where
+        TPayload: Debug,
+    {
         // Verification first, no changing state
         debug!("Validating the event");
 
         trace!("Creating an event");
-        let new_event = match event_type {
-            EventKind::Genesis => {
-                EventWrapper::new(payload, event::Kind::Genesis, author, time_created)?
-            }
-            EventKind::Regular(Parents {
-                self_parent,
-                other_parent,
-            }) => EventWrapper::new(
-                payload,
-                event::Kind::Regular(Parents {
-                    self_parent,
-                    other_parent,
-                }),
-                author,
-                time_created,
-            )?,
-        };
-        trace!("Event hash: {}", new_event.hash());
+        let new_event = EventWrapper::new(event);
+        trace!("Event hash: {}", new_event.inner().identifier());
 
         trace!("Testing if event is already known");
-        if self.all_events.contains_key(new_event.hash()) {
-            return Err(PushError::EventAlreadyExists(new_event.hash().clone()));
+        if self.all_events.contains_key(new_event.inner().identifier()) {
+            return Err(PushError::EventAlreadyExists(
+                new_event.inner().identifier().clone(),
+            ));
         }
 
         trace!("Performing checks or updates specific to genesis or regular events");
         match new_event.parents() {
             event::Kind::Genesis => {
                 trace!("It is a genesis event");
-                if self.peer_index.contains_key(&author) {
+                if self.peer_index.contains_key(&new_event.author()) {
                     return Err(PushError::GenesisAlreadyExists);
                 }
                 debug!("The event is valid, updating state to include it");
-                let new_peer_index = PeerIndexEntry::new(new_event.hash().clone());
-                self.peer_index.insert(author, new_peer_index);
+                let new_peer_index = PeerIndexEntry::new(new_event.inner().identifier().clone());
+                self.peer_index
+                    .insert(new_event.author().clone(), new_peer_index);
             }
             event::Kind::Regular(parents) => {
                 trace!("It is a regular event");
@@ -233,23 +222,23 @@ where
 
                 // self parent must have the same author by definition
                 trace!("Author validation with self parent");
-                if self_parent_event.author() != &author {
+                if self_parent_event.author() != new_event.author() {
                     debug!(
                         "Specified self parent author ({}) differs from provided one ({})",
                         self_parent_event.author(),
-                        author
+                        new_event.author()
                     );
                     return Err(PushError::IncorrectAuthor(
                         self_parent_event.author().clone(),
-                        author,
+                        new_event.author().clone(),
                     ));
                 }
 
                 // taking mutable for update later
                 let author_index = self
                     .peer_index
-                    .get_mut(&author)
-                    .ok_or(PushError::PeerNotFound(author))?;
+                    .get_mut(&new_event.author())
+                    .ok_or(PushError::PeerNotFound(new_event.author().clone()))?;
 
                 // Insertion, should be valid at this point so that we don't leave in inconsistent state on error.
                 debug!("The event is valid, updating state to include it");
@@ -259,7 +248,7 @@ where
                 self_parent_event
                     .children
                     .self_child
-                    .add_child(new_event.hash().clone());
+                    .add_child(new_event.inner().identifier().clone());
                 // Borrow checker doesn't want to treat the parameter to add_event
                 // as immutable reference otherwise :(
                 let self_parent_event = self
@@ -278,7 +267,7 @@ where
                     },
                     self_parent_event,
                     parents.other_parent.clone(),
-                    new_event.hash().clone(),
+                    new_event.inner().identifier().clone(),
                 ) {
                     warn!("Peer index insertion error: {}", e);
                 }
@@ -289,13 +278,13 @@ where
                 other_parent_event
                     .children
                     .other_children
-                    .push(new_event.hash().clone());
+                    .push(new_event.inner().identifier().clone());
             }
         };
 
         // Index the event and save
         trace!("Tracking the event");
-        let hash = new_event.hash().clone();
+        let hash = new_event.inner().identifier().clone();
         self.all_events.insert(hash.clone(), new_event);
 
         // Set round
@@ -350,7 +339,9 @@ where
 
 /// Synchronization-related stuff.
 impl<TPayload> Graph<TPayload> {
-    pub fn generate_sync_for(&self, peer: &PeerId) -> sync::Jobs<TPayload> {}
+    pub fn generate_sync_for(&self, peer: &PeerId) -> sync::Jobs<TPayload> {
+        todo!()
+    }
 }
 
 impl<TPayload> Graph<TPayload>
@@ -563,7 +554,7 @@ where
         // with `round_received` less than desired.
         let iter = SliceIterator::new(
             &init_slice,
-            |event: &EventWrapper<TPayload>| match self.ordering_data(event.hash()) {
+            |event: &EventWrapper<TPayload>| match self.ordering_data(event.inner().identifier()) {
                 Ok((round_received, _, _)) => round_received < target_round_received,
                 Err(OrderingDataError::Undecided) => false,
                 Err(OrderingDataError::UnknownEvent(UnknownEvent(e))) => {
@@ -578,11 +569,11 @@ where
 
         trace!("Getting ordered events");
         for event in iter {
-            match self.ordering_data(event.hash()) {
+            match self.ordering_data(event.inner().identifier()) {
                 Ok((round_received, consensus_timestamp, event_signature)) => {
                     if round_received == target_round_received {
                         trace!("Found event with target round received");
-                        result.push((event.hash().clone(), consensus_timestamp, event_signature))
+                        result.push((event.inner().identifier().clone(), consensus_timestamp, event_signature))
                     } else {
                         trace!("Not expected round received, skipping");
                         continue;
@@ -697,7 +688,7 @@ impl<TPayload> Graph<TPayload> {
                     round_witnesses
                         .iter()
                         .fold(HashSet::new(), |mut set, witness| {
-                            if self.strongly_see(event_hash, &witness.hash()) {
+                            if self.strongly_see(event_hash, &witness.inner().identifier()) {
                                 let author = witness.author();
                                 set.insert(author.clone());
                             }
@@ -1035,7 +1026,7 @@ impl<TPayload> Graph<TPayload> {
                         .next()
                         .expect("at least 1 self-ancestor must be present - the event itself");
                     for next_ufw_ancestor in self_ancestors {
-                        if !self.is_ancestor(next_ufw_ancestor.hash(), event_hash) {
+                        if !self.is_ancestor(next_ufw_ancestor.inner().identifier(), event_hash) {
                             break;
                         }
                         first_descendant_event_candidate = next_ufw_ancestor
@@ -1068,7 +1059,7 @@ impl<TPayload> Graph<TPayload> {
 
         self.ancestor_iter(target)
             .unwrap()
-            .any(|e| e.hash() == potential_ancestor)
+            .any(|e| e.inner().identifier() == potential_ancestor)
     }
 
     /// True if target(y) is an ancestor of observer(x), but no fork of target is an
@@ -1086,7 +1077,7 @@ impl<TPayload> Graph<TPayload> {
         let authors_seen = self
             .ancestor_iter(observer)
             .unwrap()
-            .filter(|e| self.see(&e.hash(), target))
+            .filter(|e| self.see(&e.inner().identifier(), target))
             .fold(HashSet::new(), |mut set, event| {
                 let author = event.author();
                 set.insert(author.clone());

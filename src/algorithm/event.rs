@@ -83,6 +83,10 @@ impl<TPayload> EventWrapper<TPayload> {
         }
     }
 
+    pub fn inner(&self) -> &Event<TPayload> {
+        &self.inner
+    }
+
     #[cfg(test)]
     pub fn new_unsigned(
         payload: TPayload,
@@ -93,11 +97,7 @@ impl<TPayload> EventWrapper<TPayload> {
     where
         TPayload: Serialize,
     {
-        let unsigned_event = Event::new(payload, event_kind, author, timestamp, |h| Hash {
-            inner: h
-                .try_into()
-                .expect("Fixed hash function must return same result length"),
-        })?;
+        let unsigned_event = Event::new_unsigned(payload, event_kind, author, timestamp)?;
         Ok(Self::new(unsigned_event))
     }
 }
@@ -179,6 +179,23 @@ impl<TPayload: Serialize> Event<TPayload> {
         // Should be compiler checkable but the developers of the library
         // didn't use generic constants, which would allow to work with arrays right away
         Ok(signature)
+    }
+
+    #[cfg(test)]
+    pub fn new_unsigned(
+        payload: TPayload,
+        event_kind: Kind,
+        author: PeerId,
+        timestamp: Timestamp,
+    ) -> Result<Self, bincode::Error>
+    where
+        TPayload: Serialize,
+    {
+        Self::new(payload, event_kind, author, timestamp, |h| Hash {
+            inner: h
+                .try_into()
+                .expect("Fixed hash function must return same result length"),
+        })
     }
 }
 
