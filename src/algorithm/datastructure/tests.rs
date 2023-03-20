@@ -815,7 +815,7 @@ fn missing_parent_fails() {
         names: _,
         setup_name: _,
     } = build_graph_from_paper((), 999).unwrap();
-    let fake_event = Event::new((), event::Kind::Genesis, 1232423, 123).unwrap();
+    let fake_event = EventWrapper::new((), event::Kind::Genesis, 1232423, 123).unwrap();
     let legit_event_hash = graph.peer_latest_event(&0).unwrap().clone();
 
     let fake_parents_1 = Parents {

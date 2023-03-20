@@ -65,13 +65,47 @@ impl Hash {
 }
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
-pub struct Event<TPayload> {
+/// Graph event with additional metadata for navigation etc.
+pub struct EventWrapper<TPayload> {
     // parents are inside `type_specific`, as geneses do not have ones
     pub children: Children,
+    inner: Event<TPayload>,
+}
 
-    // Hash of user payload + parents + author data + timestamp (blockchain-like)
-    // TODO: write why
-    id: Hash,
+impl<TPayload> EventWrapper<TPayload> {
+    pub fn new(inner: Event<TPayload>) -> Self {
+        EventWrapper {
+            children: Children {
+                self_child: SelfChild::HonestParent(None),
+                other_children: vec![],
+            },
+            inner,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn new_unsigned(
+        payload: TPayload,
+        event_kind: Kind,
+        author: PeerId,
+        timestamp: Timestamp,
+    ) -> Result<Self, bincode::Error>
+    where
+        TPayload: Serialize,
+    {
+        let unsigned_event = Event::new(payload, event_kind, author, timestamp, |h| Hash {
+            inner: h
+                .try_into()
+                .expect("Fixed hash function must return same result length"),
+        })?;
+        Ok(Self::new(unsigned_event))
+    }
+}
+
+#[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
+pub struct Event<TPayload> {
+    /// Hash of all other fields of the event, signed by author's private key
+    signature: Hash,
 
     user_payload: TPayload,
     parents: Kind,
@@ -80,11 +114,79 @@ pub struct Event<TPayload> {
     timestamp: Timestamp,
 }
 
+impl<TPayload> Event<TPayload> {
+    pub fn identifier(&self) -> &Hash {
+        &self.signature
+    }
+}
+
+impl<TPayload: Serialize> Event<TPayload> {
+    pub fn new<F>(
+        payload: TPayload,
+        event_kind: Kind,
+        author: PeerId,
+        timestamp: Timestamp,
+        sign: F,
+    ) -> bincode::Result<Self>
+    where
+        F: FnOnce(&[u8]) -> Hash,
+    {
+        let signature =
+            Self::calculate_signature(&payload, &event_kind, &author, &timestamp, sign)?;
+        Ok(Event {
+            signature,
+            user_payload: payload,
+            parents: event_kind,
+            author,
+            timestamp,
+        })
+    }
+
+    fn digest_from_parts(
+        payload: &TPayload,
+        event_kind: &Kind,
+        author: &PeerId,
+        timestamp: &Timestamp,
+    ) -> bincode::Result<Vec<u8>> {
+        let mut v = vec![];
+        let payload_bytes = bincode::serialize(&payload)?;
+        v.extend(payload_bytes);
+        let kind_bytes = bincode::serialize(&event_kind)?;
+        v.extend(kind_bytes);
+        let author_bytes = bincode::serialize(&author)?;
+        v.extend(author_bytes);
+        let timestamp_bytes = bincode::serialize(&timestamp)?;
+        v.extend(timestamp_bytes);
+        Ok(v)
+    }
+
+    fn calculate_signature<F>(
+        payload: &TPayload,
+        event_kind: &Kind,
+        author: &PeerId,
+        timestamp: &Timestamp,
+        sign: F,
+    ) -> bincode::Result<Hash>
+    where
+        F: FnOnce(&[u8]) -> Hash,
+    {
+        let mut hasher = Blake2b512::new();
+        hasher.update(Self::digest_from_parts(
+            payload, event_kind, author, timestamp,
+        )?);
+        let hash_slice = &hasher.finalize()[..];
+        let signature = sign(hash_slice);
+        // Should be compiler checkable but the developers of the library
+        // didn't use generic constants, which would allow to work with arrays right away
+        Ok(signature)
+    }
+}
+
 #[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
 pub struct Children {
     // Child(-ren in case of forks) with the same author
     pub self_child: SelfChild,
-    // Children created by different peers
+    // Children  created by different peers
     pub other_children: Vec<Hash>,
 }
 
@@ -166,90 +268,26 @@ pub enum Kind {
     Regular(Parents),
 }
 
-impl<TPayload: Serialize> Event<TPayload> {
-    pub fn new(
-        payload: TPayload,
-        event_kind: Kind,
-        author: PeerId,
-        timestamp: Timestamp,
-    ) -> bincode::Result<Self> {
-        let hash = Self::calculate_hash(&payload, &event_kind, &author, &timestamp)?;
-        Ok(Event {
-            children: Children {
-                self_child: SelfChild::HonestParent(None),
-                other_children: vec![],
-            },
-            id: hash,
-            user_payload: payload,
-            parents: event_kind,
-            author,
-            timestamp,
-        })
-    }
-
-    fn digest_from_parts(
-        payload: &TPayload,
-        event_kind: &Kind,
-        author: &PeerId,
-        timestamp: &Timestamp,
-    ) -> bincode::Result<Vec<u8>> {
-        let mut v = vec![];
-        let payload_bytes = bincode::serialize(&payload)?;
-        v.extend(payload_bytes);
-        let kind_bytes = bincode::serialize(&event_kind)?;
-        v.extend(kind_bytes);
-        let author_bytes = bincode::serialize(&author)?;
-        v.extend(author_bytes);
-        let timestamp_bytes = bincode::serialize(&timestamp)?;
-        v.extend(timestamp_bytes);
-        Ok(v)
-    }
-
-    fn calculate_hash(
-        payload: &TPayload,
-        event_kind: &Kind,
-        author: &PeerId,
-        timestamp: &Timestamp,
-    ) -> bincode::Result<Hash> {
-        let mut hasher = Blake2b512::new();
-        hasher.update(Self::digest_from_parts(
-            payload, event_kind, author, timestamp,
-        )?);
-        let hash_slice = &hasher.finalize()[..];
-        // Should be compiler checkable but the developers of the library
-        // didn't use generic constants, which would allow to work with arrays right away
-        Ok(Hash {
-            inner: hash_slice
-                .try_into()
-                .expect("Fixed hash function must return same result length"),
-        })
-    }
-}
-
-impl<TPayload> Event<TPayload> {
-    pub fn hash(&self) -> &Hash {
-        &self.id
-    }
-
+impl<TPayload> EventWrapper<TPayload> {
     // TODO: actually have signature
     pub fn signature(&self) -> &Signature {
-        self.hash()
+        self.inner.identifier()
     }
 
     pub fn parents(&self) -> &Kind {
-        &self.parents
+        &self.inner.parents
     }
 
     pub fn payload(&self) -> &TPayload {
-        &self.user_payload
+        &self.inner.user_payload
     }
 
     pub fn author(&self) -> &PeerId {
-        &self.author
+        &self.inner.author
     }
 
     pub fn timestamp(&self) -> &u128 {
-        &self.timestamp
+        &self.inner.timestamp
     }
 }
 
@@ -261,7 +299,7 @@ mod tests {
 
     use super::*;
 
-    fn create_events() -> Result<Vec<Event<i32>>, bincode::Error> {
+    fn create_events() -> Result<Vec<EventWrapper<i32>>, bincode::Error> {
         let mock_parents_1 = Parents {
             self_parent: Hash {
                 inner: hex!(
@@ -291,11 +329,11 @@ mod tests {
             },
         };
         let results = vec![
-            Event::new(0, Kind::Genesis, 0, 0)?,
-            Event::new(0, Kind::Genesis, 1, 0)?,
-            Event::new(0, Kind::Regular(mock_parents_1.clone()), 0, 0)?,
-            Event::new(0, Kind::Regular(mock_parents_2.clone()), 0, 0)?,
-            Event::new(
+            EventWrapper::new_unsigned(0, Kind::Genesis, 0, 0)?,
+            EventWrapper::new_unsigned(0, Kind::Genesis, 1, 0)?,
+            EventWrapper::new_unsigned(0, Kind::Regular(mock_parents_1.clone()), 0, 0)?,
+            EventWrapper::new_unsigned(0, Kind::Regular(mock_parents_2.clone()), 0, 0)?,
+            EventWrapper::new_unsigned(
                 0,
                 Kind::Regular(Parents {
                     self_parent: mock_parents_1.self_parent.clone(),
@@ -304,7 +342,7 @@ mod tests {
                 0,
                 0,
             )?,
-            Event::new(
+            EventWrapper::new_unsigned(
                 0,
                 Kind::Regular(Parents {
                     self_parent: mock_parents_2.self_parent.clone(),
@@ -313,8 +351,8 @@ mod tests {
                 0,
                 0,
             )?,
-            Event::new(1234567, Kind::Genesis, 0, 0)?,
-            Event::new(1234567, Kind::Regular(mock_parents_1.clone()), 0, 1)?,
+            EventWrapper::new_unsigned(1234567, Kind::Genesis, 0, 0)?,
+            EventWrapper::new_unsigned(1234567, Kind::Regular(mock_parents_1.clone()), 0, 1)?,
         ];
         Ok(results)
     }
@@ -323,20 +361,20 @@ mod tests {
     fn events_create() {
         create_events().unwrap();
         // also test on various payloads
-        Event::new((), Kind::Genesis, 0, 0).unwrap();
-        Event::new((0,), Kind::Genesis, 0, 0).unwrap();
-        Event::new(vec![()], Kind::Genesis, 0, 0).unwrap();
-        Event::new("asdassa", Kind::Genesis, 0, 0).unwrap();
-        Event::new("asdassa".to_owned(), Kind::Genesis, 0, 0).unwrap();
+        EventWrapper::new_unsigned((), Kind::Genesis, 0, 0).unwrap();
+        EventWrapper::new_unsigned((0,), Kind::Genesis, 0, 0).unwrap();
+        EventWrapper::new_unsigned(vec![()], Kind::Genesis, 0, 0).unwrap();
+        EventWrapper::new_unsigned("asdassa", Kind::Genesis, 0, 0).unwrap();
+        EventWrapper::new_unsigned("asdassa".to_owned(), Kind::Genesis, 0, 0).unwrap();
     }
 
     #[test]
     fn hashes_unique() {
         let events = create_events().unwrap();
-        let mut hashes = HashSet::with_capacity(events.len());
+        let mut identifiers = HashSet::with_capacity(events.len());
         for n in events {
-            assert!(!hashes.contains(n.hash()));
-            hashes.insert(n.hash().clone());
+            assert!(!identifiers.contains(n.signature()));
+            identifiers.insert(n.signature().clone());
         }
     }
 }

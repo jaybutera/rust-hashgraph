@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use self::ordering::OrderedEvents;
 use self::peer_index::{PeerIndex, PeerIndexEntry};
 use self::slice::SliceIterator;
-use super::event::{self, Event, Parents};
+use super::event::{self, EventWrapper, Parents};
 use super::{EventKind, PushError, RoundNum};
 use crate::{PeerId, Timestamp};
 
@@ -109,7 +109,7 @@ pub enum OrderedEventsError {
 pub type EventIndex<TValue> = HashMap<event::Hash, TValue>;
 
 pub struct Graph<TPayload> {
-    all_events: EventIndex<Event<TPayload>>,
+    all_events: EventIndex<EventWrapper<TPayload>>,
     peer_index: PeerIndex,
     /// Consistent and reliable index (should be)
     round_index: Vec<HashSet<event::Hash>>,
@@ -181,11 +181,13 @@ where
 
         trace!("Creating an event");
         let new_event = match event_type {
-            EventKind::Genesis => Event::new(payload, event::Kind::Genesis, author, time_created)?,
+            EventKind::Genesis => {
+                EventWrapper::new(payload, event::Kind::Genesis, author, time_created)?
+            }
             EventKind::Regular(Parents {
                 self_parent,
                 other_parent,
-            }) => Event::new(
+            }) => EventWrapper::new(
                 payload,
                 event::Kind::Regular(Parents {
                     self_parent,
@@ -337,7 +339,7 @@ where
         Ok(hash)
     }
 
-    pub fn next_event(&mut self) -> Option<&Event<TPayload>> {
+    pub fn next_event(&mut self) -> Option<&EventWrapper<TPayload>> {
         self.ordering.next_event().map(|hash| {
             self.all_events
                 .get(hash)
@@ -347,7 +349,9 @@ where
 }
 
 /// Synchronization-related stuff.
-impl<TPayload> Graph<TPayload> {}
+impl<TPayload> Graph<TPayload> {
+    pub fn generate_sync_for(&self, peer: &PeerId) -> sync::Jobs<TPayload> {}
+}
 
 impl<TPayload> Graph<TPayload>
 where
@@ -559,7 +563,7 @@ where
         // with `round_received` less than desired.
         let iter = SliceIterator::new(
             &init_slice,
-            |event: &Event<TPayload>| match self.ordering_data(event.hash()) {
+            |event: &EventWrapper<TPayload>| match self.ordering_data(event.hash()) {
                 Ok((round_received, _, _)) => round_received < target_round_received,
                 Err(OrderingDataError::Undecided) => false,
                 Err(OrderingDataError::UnknownEvent(UnknownEvent(e))) => {
@@ -620,7 +624,7 @@ impl<TPayload> Graph<TPayload> {
     }
 
     // for navigating the graph state externally
-    pub fn event(&self, id: &event::Hash) -> Option<&event::Event<TPayload>> {
+    pub fn event(&self, id: &event::Hash) -> Option<&event::EventWrapper<TPayload>> {
         self.all_events.get(id)
     }
 
@@ -1094,13 +1098,16 @@ impl<TPayload> Graph<TPayload> {
 }
 
 struct AncestorIter<'a, T> {
-    event_list: Vec<&'a Event<T>>,
-    all_events: &'a HashMap<event::Hash, Event<T>>,
+    event_list: Vec<&'a EventWrapper<T>>,
+    all_events: &'a HashMap<event::Hash, EventWrapper<T>>,
     visited_events: HashSet<&'a event::Hash>,
 }
 
 impl<'a, T> AncestorIter<'a, T> {
-    fn new(all_events: &'a HashMap<event::Hash, Event<T>>, ancestors_of: &'a event::Hash) -> Self {
+    fn new(
+        all_events: &'a HashMap<event::Hash, EventWrapper<T>>,
+        ancestors_of: &'a event::Hash,
+    ) -> Self {
         let mut iter = AncestorIter {
             event_list: vec![],
             all_events: all_events,
@@ -1134,7 +1141,7 @@ impl<'a, T> AncestorIter<'a, T> {
 }
 
 impl<'a, T> Iterator for AncestorIter<'a, T> {
-    type Item = &'a Event<T>;
+    type Item = &'a EventWrapper<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let event = self.event_list.pop()?;
@@ -1147,12 +1154,12 @@ impl<'a, T> Iterator for AncestorIter<'a, T> {
 }
 
 struct SelfAncestorIter<'a, T> {
-    event_list: VecDeque<&'a Event<T>>,
+    event_list: VecDeque<&'a EventWrapper<T>>,
 }
 
 impl<'a, T> SelfAncestorIter<'a, T> {
     fn new(
-        all_events: &'a HashMap<event::Hash, Event<T>>,
+        all_events: &'a HashMap<event::Hash, EventWrapper<T>>,
         ancestors_of: &'a event::Hash,
     ) -> Option<Self> {
         let mut event_list = VecDeque::new();
@@ -1171,7 +1178,7 @@ impl<'a, T> SelfAncestorIter<'a, T> {
 }
 
 impl<'a, T> Iterator for SelfAncestorIter<'a, T> {
-    type Item = &'a Event<T>;
+    type Item = &'a EventWrapper<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.event_list.pop_front()

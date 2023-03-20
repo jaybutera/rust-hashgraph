@@ -54,7 +54,7 @@ impl PeerIndexEntry {
     pub fn add_event<'a, TPayload, F>(
         &mut self,
         events_in_direct_sight: F,
-        self_parent: &event::Event<TPayload>,
+        self_parent: &event::EventWrapper<TPayload>,
         other_parent: event::Hash,
         event: event::Hash,
     ) -> Result<(), Error>
@@ -139,10 +139,13 @@ mod tests {
 
     // Returns the index and all_events tracker
     fn construct_peer_index<TPayload: Clone>(
-        events: &[event::Event<TPayload>],
-    ) -> (PeerIndexEntry, HashMap<event::Hash, event::Event<TPayload>>) {
+        events: &[event::EventWrapper<TPayload>],
+    ) -> (
+        PeerIndexEntry,
+        HashMap<event::Hash, event::EventWrapper<TPayload>>,
+    ) {
         let mut events = events.into_iter();
-        let mut all_events: HashMap<event::Hash, event::Event<TPayload>> = HashMap::new();
+        let mut all_events: HashMap<event::Hash, event::EventWrapper<TPayload>> = HashMap::new();
         let genesis = events.next().expect("event list must be nonempty");
         all_events.insert(genesis.hash().clone(), genesis.clone());
         let mut peer_index = PeerIndexEntry::new(genesis.hash().clone());
@@ -187,10 +190,11 @@ mod tests {
 
         // Since we work with actual events, we can't use our sample hashes.
         let event_a =
-            event::Event::new((), event::Kind::Genesis, peer, start_time.as_secs().into()).unwrap();
+            event::EventWrapper::new((), event::Kind::Genesis, peer, start_time.as_secs().into())
+                .unwrap();
         let a_hash = event_a.hash().clone();
 
-        let event_b = event::Event::new(
+        let event_b = event::EventWrapper::new(
             (),
             event::Kind::Regular(event::Parents {
                 self_parent: a_hash.clone(),
@@ -203,7 +207,7 @@ mod tests {
         .unwrap();
         let b_hash = event_b.hash().clone();
 
-        let event_c = event::Event::new(
+        let event_c = event::EventWrapper::new(
             (),
             event::Kind::Regular(event::Parents {
                 self_parent: b_hash.clone(),
@@ -215,7 +219,7 @@ mod tests {
         )
         .unwrap();
 
-        let event_d = event::Event::new(
+        let event_d = event::EventWrapper::new(
             (),
             event::Kind::Regular(event::Parents {
                 self_parent: b_hash.clone(),
@@ -227,7 +231,7 @@ mod tests {
         )
         .unwrap();
 
-        let event_e = event::Event::new(
+        let event_e = event::EventWrapper::new(
             (),
             event::Kind::Regular(event::Parents {
                 self_parent: b_hash.clone(),
@@ -239,7 +243,7 @@ mod tests {
         )
         .unwrap();
 
-        let event_f = event::Event::new(
+        let event_f = event::EventWrapper::new(
             (),
             event::Kind::Regular(event::Parents {
                 self_parent: a_hash.clone(),
@@ -263,11 +267,7 @@ mod tests {
             "authored events not tracked correctly"
         );
         fn assert_latest(latest: &HashSet<event::Hash>, event: &event::Hash) {
-            assert!(
-                latest
-                    .contains(event),
-                "Event is not tracked as tip"
-            );
+            assert!(latest.contains(event), "Event is not tracked as tip");
         }
         // f
         assert_latest(&index_2.latest_events, events[5].hash());
