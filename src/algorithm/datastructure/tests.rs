@@ -202,7 +202,7 @@ struct PeerEvents {
 // Graph, Events by each peer, Test event names (for easier reading), Graph name
 struct TestSetup<T> {
     /// Graph state
-    graph: Graph<T>,
+    graph: Graph<T, ()>,
     /// For getting hashes for events
     peers_events: HashMap<String, PeerEvents>,
     /// For lookup of readable event name
@@ -220,7 +220,7 @@ struct Test<TPayload, TResult, TArg> {
 ///
 /// # Arguments
 /// * `cases`: List of test cases. Each list entry consists of graph (with
-/// helper data structures, see [`TestGraph`](TestGraph<T>)) and test cases
+/// helper data structures, see [`TestGraph`](TestGraph<T, ()>)) and test cases
 /// for the graph. The graph cases are grouped by result expected. For each
 /// result there is a list of arguments to be supplied to `tested_function`.
 ///
@@ -272,7 +272,7 @@ fn test_cases<TPayload, TArg, TResult, F, FNameLookup>(
     tested_function: F,
     name_lookup: FNameLookup,
 ) where
-    F: Fn(&mut Graph<TPayload>, &TArg) -> TResult,
+    F: Fn(&mut Graph<TPayload, ()>, &TArg) -> TResult,
     TResult: PartialEq + std::fmt::Debug,
     FNameLookup: Fn(&HashMap<event::Hash, String>, &TArg) -> String,
 {
@@ -307,7 +307,7 @@ fn test_cases<TPayload, TArg, TResult, F, FNameLookup>(
 
 /// See [`add_events_with_timestamps`]
 fn add_events<T, TIter>(
-    graph: &mut Graph<T>,
+    graph: &mut Graph<T, ()>,
     events: &[(&'static str, &'static str, &'static str)],
     author_ids: HashMap<&'static str, PeerId>,
     payload: &mut TIter,
@@ -349,7 +349,7 @@ where
 ///
 /// first match is chosen
 fn add_events_with_timestamps<T, TIter>(
-    graph: &mut Graph<T>,
+    graph: &mut Graph<T, ()>,
     events: &[(&'static str, &'static str, &'static str)],
     author_ids: HashMap<&'static str, PeerId>,
     payload: &mut TIter,
@@ -492,7 +492,7 @@ where
 }
 
 fn add_geneses<T>(
-    graph: &mut Graph<T>,
+    graph: &mut Graph<T, ()>,
     this_author: &str,
     author_ids: &HashMap<&'static str, PeerId>,
     payload: T,
@@ -525,7 +525,13 @@ where
     T: Serialize + Copy + Default + Eq + Hash + Debug,
 {
     let author_ids = HashMap::from([("a", 0), ("b", 1), ("c", 2), ("d", 3), ("e", 4)]);
-    let mut graph = Graph::new(*author_ids.get("a").unwrap(), payload, 0, coin_frequency);
+    let mut graph = Graph::new(
+        *author_ids.get("a").unwrap(),
+        payload,
+        0,
+        coin_frequency,
+        (),
+    );
     let mut names =
         add_geneses(&mut graph, "a", &author_ids, payload).map_err(|e| format!("{}", e))?;
     let events = [
@@ -570,7 +576,13 @@ where
         o  o  o  -- (g1,g2,g3)
     */
     let author_ids = HashMap::from([("g1", 0), ("g2", 1), ("g3", 2)]);
-    let mut graph = Graph::new(*author_ids.get("g1").unwrap(), payload, 0, coin_frequency);
+    let mut graph = Graph::new(
+        *author_ids.get("g1").unwrap(),
+        payload,
+        0,
+        coin_frequency,
+        (),
+    );
     let mut names =
         add_geneses(&mut graph, "g1", &author_ids, payload).map_err(|e| format!("{}", e))?;
     let events = [
@@ -618,7 +630,13 @@ where
     // also in resources/graph_example.png
 
     let author_ids = HashMap::from([("a", 0), ("b", 1), ("c", 2), ("d", 3)]);
-    let mut graph = Graph::new(*author_ids.get("a").unwrap(), payload, 0, coin_frequency);
+    let mut graph = Graph::new(
+        *author_ids.get("a").unwrap(),
+        payload,
+        0,
+        coin_frequency,
+        (),
+    );
     let mut names =
         add_geneses(&mut graph, "a", &author_ids, payload).map_err(|e| format!("{}", e))?;
     // resources/graph_example.png for reference
@@ -702,6 +720,7 @@ where
         payload.next().expect("Iterator finished"),
         0,
         coin_frequency,
+        (),
     );
     let mut names = add_geneses(
         &mut graph,
@@ -743,7 +762,13 @@ where
     // Graph to test round_index assignment. It seems that the logic is broken slightly,
     // this should fail with existing impl.
     let author_ids = HashMap::from([("a", 0), ("b", 1), ("c", 2), ("d", 3)]);
-    let mut graph = Graph::new(*author_ids.get("b").unwrap(), payload, 0, coin_frequency);
+    let mut graph = Graph::new(
+        *author_ids.get("b").unwrap(),
+        payload,
+        0,
+        coin_frequency,
+        (),
+    );
     let mut names =
         add_geneses(&mut graph, "b", &author_ids, payload).map_err(|e| format!("{}", e))?;
     // resources/graph_example.png for reference
@@ -1257,7 +1282,10 @@ fn test_determine_round() {
 #[test]
 fn test_round_indices_consistent() {
     // Uses internal state, yes. Want to make sure it's consistent to avoid future problems.
-    fn round_index_consistent<T>(graph: &Graph<T>, hash: &event::Hash) -> Result<usize, String> {
+    fn round_index_consistent<T>(
+        graph: &Graph<T, ()>,
+        hash: &event::Hash,
+    ) -> Result<usize, String> {
         let round_of_num = graph.round_of(hash);
         let round_index = graph
             .round_index

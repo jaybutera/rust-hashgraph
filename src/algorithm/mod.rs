@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use blake2::{Blake2b512, Digest};
 use thiserror::Error;
 
 use crate::PeerId;
@@ -16,10 +16,17 @@ type RoundNum = usize;
 // TODO: change to actual signature
 type Signature = event::Hash;
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub enum EventKind {
-    Genesis,
-    Regular(event::Parents),
+pub trait Signer {
+    fn sign(&self, message: &[u8]) -> Signature;
+}
+
+impl Signer for () {
+    fn sign(&self, message: &[u8]) -> Signature {
+        let mut hasher = Blake2b512::new();
+        hasher.update(message);
+        let hash_slice = &hasher.finalize()[..];
+        Signature::from_array(hash_slice.try_into().unwrap())
+    }
 }
 
 #[derive(Error, Debug)]

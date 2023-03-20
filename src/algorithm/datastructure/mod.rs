@@ -10,7 +10,8 @@ use self::ordering::OrderedEvents;
 use self::peer_index::{PeerIndex, PeerIndexEntry};
 use self::slice::SliceIterator;
 use super::event::{self, Event, EventWrapper, Parents};
-use super::{EventKind, PushError, RoundNum};
+use super::{PushError, RoundNum};
+use crate::algorithm::Signer;
 use crate::{PeerId, Timestamp};
 
 mod ordering;
@@ -109,7 +110,7 @@ pub enum OrderedEventsError {
 
 pub type EventIndex<TValue> = HashMap<event::Hash, TValue>;
 
-pub struct Graph<TPayload> {
+pub struct Graph<TPayload, TSigner> {
     all_events: EventIndex<EventWrapper<TPayload>>,
     peer_index: PeerIndex,
     /// Consistent and reliable index (should be)
@@ -130,17 +131,22 @@ pub struct Graph<TPayload> {
     self_id: PeerId,
     /// Coin round frequency
     coin_frequency: usize,
+
+    /// To sign events produced by us
+    signer: TSigner,
 }
 
-impl<TPayload> Graph<TPayload>
+impl<TPayload, TSigner> Graph<TPayload, TSigner>
 where
     TPayload: Serialize + Eq + std::hash::Hash + Debug,
+    TSigner: Signer,
 {
     pub fn new(
         self_id: PeerId,
         genesis_payload: TPayload,
         genesis_timestamp: Timestamp,
         coin_frequency: usize,
+        signer: TSigner,
     ) -> Self {
         let mut graph = Self {
             all_events: HashMap::new(),
@@ -153,6 +159,7 @@ where
             last_known_decided_round: None,
             ordering: OrderedEvents::new(),
             coin_frequency,
+            signer,
         };
 
         graph
@@ -162,7 +169,7 @@ where
                     event::Kind::Genesis,
                     self_id,
                     genesis_timestamp,
-                    todo!(),
+                    |h| graph.signer.sign(h),
                 )
                 .expect("Invalid own genesis, can't start consensus"),
             )
@@ -338,13 +345,13 @@ where
 }
 
 /// Synchronization-related stuff.
-impl<TPayload> Graph<TPayload> {
+impl<TPayload, TSigner> Graph<TPayload, TSigner> {
     pub fn generate_sync_for(&self, peer: &PeerId) -> sync::Jobs<TPayload> {
         todo!()
     }
 }
 
-impl<TPayload> Graph<TPayload>
+impl<TPayload, TSigner> Graph<TPayload, TSigner>
 where
     TPayload: Eq + std::hash::Hash,
 {
@@ -594,7 +601,7 @@ where
     }
 }
 
-impl<TPayload> Graph<TPayload> {
+impl<TPayload, TSigner> Graph<TPayload, TSigner> {
     fn members_count(&self) -> usize {
         self.peer_index.keys().len()
     }
@@ -746,7 +753,7 @@ impl<TPayload> Graph<TPayload> {
     }
 }
 
-impl<TPayload> Graph<TPayload> {
+impl<TPayload, TSigner> Graph<TPayload, TSigner> {
     // TODO: probably move to round field in event to avoid panics and stuff
     fn round_of(&self, event_hash: &event::Hash) -> RoundNum {
         match self.round_of.get(event_hash) {
@@ -1182,7 +1189,7 @@ impl<'a, T> DoubleEndedIterator for SelfAncestorIter<'a, T> {
     }
 }
 
-impl<TPayload> crate::common::Graph for Graph<TPayload> {
+impl<TPayload, TSigner> crate::common::Graph for Graph<TPayload, TSigner> {
     type NodeIdentifier = event::Hash;
     type NodeIdentifiers =
         std::iter::Flatten<std::option::IntoIter<std::vec::IntoIter<event::Hash>>>;
