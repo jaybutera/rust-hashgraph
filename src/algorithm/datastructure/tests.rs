@@ -819,7 +819,7 @@ fn duplicate_push_fails() {
     } = build_graph_from_paper((), 999).unwrap();
     let a_id = peers.get("a").unwrap().id;
     assert!(matches!(
-        graph.push_event(Event::new_unsigned((), event::Kind::Genesis, a_id, 0).expect("Failed to create event")),
+        graph.push_event(Event::new((), event::Kind::Genesis, a_id, 0, |h| ().sign(h)).expect("Failed to create event")),
         Err(PushError::EventAlreadyExists(hash)) if &hash == graph.peer_genesis(&a_id).unwrap()
     ));
 }
