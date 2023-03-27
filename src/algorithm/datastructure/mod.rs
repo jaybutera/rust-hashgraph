@@ -345,9 +345,32 @@ where
 }
 
 /// Synchronization-related stuff.
-impl<TPayload, TSigner> Graph<TPayload, TSigner> {
-    pub fn generate_sync_for(&self, peer: &PeerId) -> sync::Jobs<TPayload> {
-        todo!()
+impl<TPayload, TSigner> Graph<TPayload, TSigner>
+where
+    TPayload: Clone,
+{
+    pub fn generate_sync_for(&self, peer: &PeerId) -> Result<sync::Jobs<TPayload>, sync::Error> {
+        let empty_set = HashSet::new();
+        let peer_known_events = self
+            .peer_index
+            .get(peer)
+            .map(|index| index.known_events())
+            .unwrap_or(&empty_set);
+        let tips = self
+            .peer_index
+            .values()
+            .flat_map(|index| index.latest_events().iter())
+            .cloned();
+        sync::Jobs::generate(
+            self,
+            |h| peer_known_events.contains(h),
+            tips,
+            |h| {
+                self.all_events
+                    .get(h)
+                    .map(|wrapper| (*wrapper.inner()).clone())
+            },
+        )
     }
 }
 
@@ -1194,9 +1217,24 @@ impl<TPayload, TSigner> crate::common::Graph for Graph<TPayload, TSigner> {
     type NodeIdentifiers = Vec<event::Hash>;
 
     fn neighbors(&self, node: &Self::NodeIdentifier) -> Option<Self::NodeIdentifiers> {
+        self.all_events.get(node).map(|some_event| {
+            let mut out_neighbors: Vec<_> = some_event.children.clone().into();
+            let mut in_neighbors: Vec<_> = some_event.parents().clone().into();
+            out_neighbors.append(&mut in_neighbors);
+            out_neighbors
+        })
+    }
+}
+
+impl<TPayload, TSigner> crate::common::Directed for Graph<TPayload, TSigner> {
+    fn in_neighbors(&self, node: &Self::NodeIdentifier) -> Option<Self::NodeIdentifiers> {
         self.all_events
             .get(node)
             .map(|some_event| some_event.children.clone().into())
+    }
+
+    fn out_neighbors(&self, node: &Self::NodeIdentifier) -> Option<Self::NodeIdentifiers> {
+        todo!()
     }
 }
 

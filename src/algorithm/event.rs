@@ -285,6 +285,18 @@ pub enum Kind {
     Regular(Parents),
 }
 
+impl Into<Vec<Hash>> for Kind {
+    fn into(self) -> Vec<Hash> {
+        match self {
+            Kind::Genesis => vec![],
+            Kind::Regular(Parents {
+                self_parent,
+                other_parent,
+            }) => vec![self_parent, other_parent],
+        }
+    }
+}
+
 impl<TPayload> EventWrapper<TPayload> {
     // TODO: actually have signature
     pub fn signature(&self) -> &Signature {
