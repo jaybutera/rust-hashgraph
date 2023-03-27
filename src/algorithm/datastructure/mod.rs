@@ -1191,18 +1191,12 @@ impl<'a, T> DoubleEndedIterator for SelfAncestorIter<'a, T> {
 
 impl<TPayload, TSigner> crate::common::Graph for Graph<TPayload, TSigner> {
     type NodeIdentifier = event::Hash;
-    type NodeIdentifiers =
-        std::iter::Flatten<std::option::IntoIter<std::vec::IntoIter<event::Hash>>>;
+    type NodeIdentifiers = Vec<event::Hash>;
 
-    fn neighbors(&self, node: &Self::NodeIdentifier) -> Self::NodeIdentifiers {
+    fn neighbors(&self, node: &Self::NodeIdentifier) -> Option<Self::NodeIdentifiers> {
         self.all_events
             .get(node)
-            .map(|some_event| {
-                let children: Vec<_> = some_event.children.clone().into();
-                children.into_iter()
-            })
-            .into_iter()
-            .flatten()
+            .map(|some_event| some_event.children.clone().into())
     }
 }
 
