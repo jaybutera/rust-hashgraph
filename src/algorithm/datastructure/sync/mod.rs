@@ -20,6 +20,10 @@ pub enum Error {
 }
 
 impl<TPayload> Jobs<TPayload> {
+    pub fn as_linear(&self) -> &Vec<event::Event<TPayload>> {
+        &self.inner
+    }
+
     /// Generate jobs for the peer to perform in order to achieve at least the same
     /// state as ours.
     pub fn generate<G, FKnows, FEvent>(
