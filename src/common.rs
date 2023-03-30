@@ -1,6 +1,6 @@
 pub trait Graph {
     type NodeIdentifier;
-    type NodeIdentifiers;
+    type NodeIdentifiers: IntoIterator<Item = Self::NodeIdentifier>;
 
     fn neighbors(&self, node: &Self::NodeIdentifier) -> Option<Self::NodeIdentifiers>;
 }

@@ -1986,12 +1986,15 @@ fn test_ordering_data_correct() {
 mod topsort_test_utils {
     use super::*;
 
-    fn verify_topsort<G: Directed>(
+    fn verify_topsort<G>(
         tested_topsort: Vec<event::Hash>,
         expected_events: HashSet<event::Hash>,
         event_relations: G,
         display_names: Option<&HashMap<event::Hash, String>>,
-    ) -> Result<(), String> {
+    ) -> Result<(), String>
+    where
+        G: Directed<NodeIdentifier = event::Hash>,
+    {
         fn display_events<'a, E>(events: E, names: Option<&HashMap<event::Hash, String>>) -> String
         where
             E: IntoIterator<Item = &'a event::Hash> + Debug,
@@ -2020,8 +2023,36 @@ mod topsort_test_utils {
                 display_events(tested_set.difference(&expected_events), display_names)
             ));
         }
-        return Ok(());
         // we test the definition of topsort.
+        let mut events_before = HashSet::with_capacity(expected_events.len());
+        for next in tested_topsort {
+            for next_in in event_relations
+                .in_neighbors(&next)
+                .expect("Graph must be consistent, all tracked neighbors must be known")
+            {
+                if expected_events.contains(&next_in) && !events_before.contains(&next_in) {
+                    return Err(format!(
+                        "event {} expected to be before {} in topsort, but it is not",
+                        next_in.clone(),
+                        next.clone()
+                    ));
+                }
+            }
+            for next_out in event_relations
+                .out_neighbors(&next)
+                .expect("Graph must be consistent, all tracked neighbors must be known")
+            {
+                if expected_events.contains(&next_out) && events_before.contains(&next_out) {
+                    return Err(format!(
+                        "event {} expected to be after {} in topsort, but it is not",
+                        next_out.clone(),
+                        next.clone()
+                    ));
+                }
+            }
+            events_before.insert(next);
+        }
+        return Ok(());
     }
 
     pub struct PeerEventsSince {
