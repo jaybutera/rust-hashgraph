@@ -2078,13 +2078,13 @@ mod topsort_test_utils {
             graph,
             peers_events: peers,
             names,
-            setup_name,
+            setup_name: _,
         } = setup;
-        let sync_for_a = graph
-            .generate_sync_for(&peers.get("a").unwrap().id)
+        let sync_for = graph
+            .generate_sync_for(&peers.get(peer_name).unwrap().id)
             .expect("Graph must be correct and consistent");
         verify_topsort(
-            sync_for_a
+            sync_for
                 .as_linear()
                 .into_iter()
                 .map(|e| e.identifier().clone())
@@ -2105,14 +2105,46 @@ mod topsort_test_utils {
 fn test_sync_data_correct() {
     use topsort_test_utils::*;
     let setup_paper = build_graph_from_paper((), 999).unwrap();
-    test_topsort(
-        &setup_paper,
-        "a",
-        vec![
-            PeerEventsSince::new("c", 3),
-            PeerEventsSince::new("d", 1),
-            PeerEventsSince::new("e", 2),
-        ],
-    )
-    .unwrap();
+    let paper_tests = vec![
+        (
+            "a",
+            vec![
+                PeerEventsSince::new("c", 3),
+                PeerEventsSince::new("d", 1),
+                PeerEventsSince::new("e", 2),
+            ],
+        ),
+        (
+            "b",
+            vec![
+                PeerEventsSince::new("a", 0),
+                PeerEventsSince::new("c", 3),
+                PeerEventsSince::new("d", 1),
+                PeerEventsSince::new("e", 2),
+            ],
+        ),
+        ("c", vec![]),
+        (
+            "d",
+            vec![
+                PeerEventsSince::new("a", 0),
+                PeerEventsSince::new("b", 1),
+                PeerEventsSince::new("c", 3),
+                PeerEventsSince::new("e", 2),
+            ],
+        ),
+        (
+            "e",
+            vec![
+                PeerEventsSince::new("a", 0),
+                PeerEventsSince::new("b", 1),
+                PeerEventsSince::new("c", 0),
+                PeerEventsSince::new("d", 0),
+            ],
+        ),
+    ];
+    for (peer_name, expected_events) in paper_tests {
+        test_topsort(&setup_paper, peer_name, expected_events)
+            .expect(&format!("sync for peer {} failed", peer_name));
+    }
 }
