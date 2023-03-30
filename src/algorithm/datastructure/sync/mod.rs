@@ -57,9 +57,12 @@ impl<TPayload> Jobs<TPayload> {
         // We can already filter out tips known to the peer, since all of its ancestors
         // are known to the peer.
 
+        // work with reversed events
+        let reversed_state = known_state.reversed();
+
         // nodes without incoming edges
         let sources: Vec<event::Hash> = known_state_tips
-            .filter_map(|h| match known_state.in_neighbors(&h) {
+            .filter_map(|h| match reversed_state.in_neighbors(&h) {
                 Some(in_neighbors) => {
                     if in_neighbors.is_empty() {
                         Some(Ok(h))
@@ -74,21 +77,20 @@ impl<TPayload> Jobs<TPayload> {
 
         // Now do topsort with stop at known events
 
-        // work with reversed events
-        let reversed = known_state.reverse();
         let mut to_visit = VecDeque::from_iter(unknown_sources);
         // to check removed edges
         let mut visited = HashSet::with_capacity(to_visit.len());
         let mut sorted = Vec::with_capacity(to_visit.len());
         while let Some(next) = to_visit.pop_front() {
-            for affected_neighbor in reversed
+            visited.insert(next.clone());
+            for affected_neighbor in reversed_state
                 .out_neighbors(&next)
                 .ok_or_else(|| Error::UnknownEvent(next.clone()))?
             {
                 if peer_knows_event(&affected_neighbor) {
                     continue;
                 }
-                if reversed
+                if reversed_state
                     .in_neighbors(&affected_neighbor)
                     .ok_or_else(|| Error::UnknownEvent(next.clone()))?
                     .into_iter()
@@ -98,7 +100,6 @@ impl<TPayload> Jobs<TPayload> {
                     to_visit.push_back(affected_neighbor)
                 }
             }
-            visited.insert(next.clone());
             sorted.push(next);
         }
         // note: no loop detection; we assume the graph already has no loops

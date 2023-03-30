@@ -30,14 +30,14 @@ impl<G: Directed> Directed for &G {
 }
 
 pub trait Reversable<'a, TReverse = ReversedGraph<'a, Self>>: Directed {
-    fn reverse(&'a self) -> TReverse;
+    fn reversed(&'a self) -> TReverse;
 }
 
 impl<'a, G> Reversable<'a, ReversedGraph<'a, G>> for G
 where
     G: Directed,
 {
-    fn reverse(&'a self) -> ReversedGraph<'a, G> {
+    fn reversed(&'a self) -> ReversedGraph<'a, G> {
         self.into()
     }
 }
@@ -81,7 +81,7 @@ impl<'a, G> Reversable<'a, &'a G> for ReversedGraph<'a, G>
 where
     G: Directed,
 {
-    fn reverse(&'a self) -> &G
+    fn reversed(&'a self) -> &G
     where
         Self: Sized,
     {

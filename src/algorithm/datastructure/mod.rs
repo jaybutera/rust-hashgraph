@@ -1230,11 +1230,13 @@ impl<TPayload, TSigner> crate::common::Directed for Graph<TPayload, TSigner> {
     fn in_neighbors(&self, node: &Self::NodeIdentifier) -> Option<Self::NodeIdentifiers> {
         self.all_events
             .get(node)
-            .map(|some_event| some_event.children.clone().into())
+            .map(|some_event| some_event.parents().clone().into())
     }
 
     fn out_neighbors(&self, node: &Self::NodeIdentifier) -> Option<Self::NodeIdentifiers> {
-        todo!()
+        self.all_events
+            .get(node)
+            .map(|some_event| some_event.children.clone().into())
     }
 }
 

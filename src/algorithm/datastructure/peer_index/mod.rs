@@ -72,11 +72,13 @@ impl PeerIndexEntry {
             return Err(Error::EventAlreadyKnown);
         }
         // `event` itself is unknown to `events_in_direct_sight` yet, so we start from its
-        // parents
+        // parents. Otherwise it will error, as `events_in_direct_sight` can't find anything
         self.add_known_events(
             vec![self_parent.inner().identifier().clone(), other_parent],
             events_in_direct_sight,
         )?;
+        // so we add the event separately
+        self.known_events.insert(event.clone());
         // Consider self children without the newly added event (just in case)
         let parent_self_children: event::SelfChild = self_parent
             .children
