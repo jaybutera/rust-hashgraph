@@ -204,7 +204,7 @@ struct PeerEvents {
 }
 
 // Graph, Events by each peer, Test event names (for easier reading), Graph name
-struct TestSetup<T> {
+pub struct TestSetup<T> {
     /// Graph state
     graph: Graph<T, ()>,
     /// For getting hashes for events
@@ -1983,72 +1983,105 @@ fn test_ordering_data_correct() {
     );
 }
 
-fn verify_topsort<G: Directed>(
-    tested_topsort: Vec<event::Hash>,
-    expected_events: HashSet<event::Hash>,
-    event_relations: G,
-    display_names: Option<&HashMap<event::Hash, String>>,
-) -> Result<(), String> {
-    fn display_events<'a, E>(events: E, names: Option<&HashMap<event::Hash, String>>) -> String
-    where
-        E: IntoIterator<Item = &'a event::Hash> + Debug,
-    {
-        match names {
-            Some(names) => {
-                format!(
-                    "[{}]",
-                    events
-                        .into_iter()
-                        .map(|h| names.get(h).expect("can't lookup event name"))
-                        .format(", ")
-                )
+mod topsort_test_utils {
+    use super::*;
+
+    fn verify_topsort<G: Directed>(
+        tested_topsort: Vec<event::Hash>,
+        expected_events: HashSet<event::Hash>,
+        event_relations: G,
+        display_names: Option<&HashMap<event::Hash, String>>,
+    ) -> Result<(), String> {
+        fn display_events<'a, E>(events: E, names: Option<&HashMap<event::Hash, String>>) -> String
+        where
+            E: IntoIterator<Item = &'a event::Hash> + Debug,
+        {
+            match names {
+                Some(names) => {
+                    format!(
+                        "[{}]",
+                        events
+                            .into_iter()
+                            .map(|h| names.get(h).expect("can't lookup event name"))
+                            .format(", ")
+                    )
+                }
+                None => format!("{:?}", events),
             }
-            None => format!("{:?}", events),
+        }
+
+        // First we need to verify that the set of events is the same,
+        // then we can check the ordering itself
+        let tested_set = HashSet::<_>::from_iter(tested_topsort.clone().into_iter());
+        if tested_set != expected_events {
+            return Err(format!(
+                "Events, missing in result: {}; unexpected events: {}",
+                display_events(expected_events.difference(&tested_set), display_names),
+                display_events(tested_set.difference(&expected_events), display_names)
+            ));
+        }
+        return Ok(());
+        // we test the definition of topsort.
+    }
+
+    pub struct PeerEventsSince {
+        peer_name: &'static str,
+        event_since_number: usize,
+    }
+
+    impl PeerEventsSince {
+        pub fn new(peer_name: &'static str, event_since_number: usize) -> Self {
+            PeerEventsSince {
+                peer_name,
+                event_since_number,
+            }
         }
     }
 
-    // First we need to verify that the set of events is the same,
-    // then we can check the ordering itself
-    let tested_set = HashSet::<_>::from_iter(tested_topsort.clone().into_iter());
-    if tested_set != expected_events {
-        return Err(format!(
-            "Events, missing in result: {}; unexpected events: {}",
-            display_events(expected_events.difference(&tested_set), display_names),
-            display_events(tested_set.difference(&expected_events), display_names)
-        ));
+    pub fn test_topsort(
+        setup: &TestSetup<()>,
+        peer_name: &str,
+        expected_events: Vec<PeerEventsSince>,
+    ) -> Result<(), String> {
+        let TestSetup {
+            graph,
+            peers_events: peers,
+            names,
+            setup_name,
+        } = setup;
+        let sync_for_a = graph
+            .generate_sync_for(&peers.get("a").unwrap().id)
+            .expect("Graph must be correct and consistent");
+        verify_topsort(
+            sync_for_a
+                .as_linear()
+                .into_iter()
+                .map(|e| e.identifier().clone())
+                .collect(),
+            HashSet::<_>::from_iter(
+                expected_events
+                    .into_iter()
+                    .map(|e| &peers.get(e.peer_name).unwrap().events[e.event_since_number..])
+                    .flat_map(|s| s.iter().cloned().collect::<Vec<event::Hash>>()),
+            ),
+            &graph,
+            Some(&names),
+        )
     }
-    return Ok(());
-    // we test the definition of topsort.
 }
 
 #[test]
 fn test_sync_data_correct() {
-    let TestSetup {
-        graph,
-        peers_events: peers,
-        names,
-        setup_name,
-    } = build_graph_from_paper((), 999).unwrap();
-    let sync_for_a = graph
-        .generate_sync_for(&peers.get("a").unwrap().id)
-        .expect("Graph must be correct and consistent");
-    verify_topsort(
-        sync_for_a
-            .as_linear()
-            .into_iter()
-            .map(|e| e.identifier().clone())
-            .collect(),
-        HashSet::<_>::from_iter(
-            vec![
-                &peers.get("c").unwrap().events[3..],
-                &peers.get("d").unwrap().events[1..],
-                &peers.get("e").unwrap().events[2..],
-            ]
-            .iter()
-            .flat_map(|s| s.iter().cloned().collect::<Vec<event::Hash>>()),
-        ),
-        &graph,
-        Some(&names),
+    use topsort_test_utils::*;
+    let setup_paper = build_graph_from_paper((), 999).unwrap();
+    test_topsort(
+        &setup_paper,
+        "a",
+        vec![
+            PeerEventsSince::new("c", 3),
+            PeerEventsSince::new("d", 1),
+            PeerEventsSince::new("e", 2),
+        ],
     )
     .unwrap();
 }
