@@ -381,8 +381,8 @@ pub mod topsort {
         }
     }
 
-    pub fn test_topsort(
-        setup: &TestSetup<()>,
+    pub fn test_topsort<T: Clone>(
+        setup: &TestSetup<T>,
         peer_name: &str,
         expected_events: Vec<PeerEventsSince>,
     ) -> Result<(), String> {

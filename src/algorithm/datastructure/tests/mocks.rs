@@ -456,7 +456,7 @@ where
         graph,
         peers_events,
         names,
-        setup_name: "Detailed examples tech report".to_owned(),
+        setup_name: "Fork graph".to_owned(),
     })
 }
 

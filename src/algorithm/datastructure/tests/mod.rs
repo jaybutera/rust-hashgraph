@@ -1204,8 +1204,9 @@ fn test_ordering_data_correct() {
 #[test]
 fn test_sync_data_correct() {
     use test_utils::topsort::*;
-    let setup_paper = build_graph_from_paper((), 999).unwrap();
-    let paper_tests = vec![
+
+    let setup = build_graph_from_paper((), 999).unwrap();
+    let tests = vec![
         (
             "a",
             vec![
@@ -1243,8 +1244,58 @@ fn test_sync_data_correct() {
             ],
         ),
     ];
-    for (peer_name, expected_events) in paper_tests {
-        test_topsort(&setup_paper, peer_name, expected_events)
+    for (peer_name, expected_events) in tests {
+        test_topsort(&setup, peer_name, expected_events)
+            .expect(&format!("sync for peer {} failed", peer_name));
+    }
+
+    let setup = build_graph_some_chain((), 999).unwrap();
+    let tests = vec![
+        (
+            "g1",
+            vec![PeerEventsSince::new("g2", 3), PeerEventsSince::new("g3", 2)],
+        ),
+        ("g2", vec![]),
+        ("g3", vec![PeerEventsSince::new("g2", 3)]),
+    ];
+    for (peer_name, expected_events) in tests {
+        test_topsort(&setup, peer_name, expected_events)
+            .expect(&format!("sync for peer {} failed", peer_name));
+    }
+
+    let setup = build_graph_detailed_example((), 999).unwrap();
+    let tests = vec![
+        (
+            "a",
+            vec![
+                PeerEventsSince::new("b", 10),
+                PeerEventsSince::new("c", 3),
+                PeerEventsSince::new("d", 9),
+            ],
+        ),
+        ("b", vec![]),
+        (
+            "c",
+            vec![
+                PeerEventsSince::new("a", 5),
+                PeerEventsSince::new("b", 7),
+                PeerEventsSince::new("d", 9),
+            ],
+        ),
+        (
+            "d",
+            vec![PeerEventsSince::new("a", 6), PeerEventsSince::new("b", 10)],
+        ),
+    ];
+    for (peer_name, expected_events) in tests {
+        test_topsort(&setup, peer_name, expected_events)
+            .expect(&format!("sync for peer {} failed", peer_name));
+    }
+
+    let setup = build_graph_fork([42, 1337, 80085].into_iter().cycle(), 999).unwrap();
+    let tests = vec![("a", vec![]), ("m", vec![PeerEventsSince::new("a", 4)])];
+    for (peer_name, expected_events) in tests {
+        test_topsort(&setup, peer_name, expected_events)
             .expect(&format!("sync for peer {} failed", peer_name));
     }
 }
