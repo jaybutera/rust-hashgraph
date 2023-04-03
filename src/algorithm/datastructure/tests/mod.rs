@@ -14,6 +14,38 @@ mod test_utils;
 // Test simple work + errors
 
 #[test]
+fn push_works() {
+    let mut graph = Graph::new(0, (), 0, 999, ());
+    
+    // new event by the same author
+    let new_event = Event::new((), event::Kind::Regular(Parents { self_parent: graph.peer_latest_event(&graph.self_id).unwrap().clone(), other_parent: graph.peer_latest_event(&graph.self_id).unwrap().clone() }), graph.self_id, 1, |h| ().sign(h)).unwrap();
+    graph.push_event(new_event).unwrap();
+
+    // new peer
+    let new_event = Event::new((), event::Kind::Genesis, 1, 2, |h| ().sign(h)).unwrap();
+    graph.push_event(new_event).unwrap();
+
+    // new event by the new peer
+    let new_event = Event::new((), event::Kind::Regular(Parents { self_parent: graph.peer_latest_event(&1).unwrap().clone(), other_parent: graph.peer_latest_event(&graph.self_id).unwrap().clone() }), 1, 3, |h| ().sign(h)).unwrap();
+    graph.push_event(new_event).unwrap();
+}
+
+#[test]
+fn create_works() {
+    let mut graph = Graph::new(0, (), 0, 999, ());
+    
+    // new event by the same author
+    graph.create_event((), graph.peer_latest_event(&graph.self_id).unwrap().clone()).unwrap();
+
+    // new peer
+    let new_event = Event::new((), event::Kind::Genesis, 1, 2, |h| ().sign(h)).unwrap();
+    graph.push_event(new_event).unwrap();
+
+    // new event by the new peer
+    graph.create_event((), graph.peer_latest_event(&1).unwrap().clone()).unwrap();
+}
+
+#[test]
 fn graph_builds() {
     build_graph_from_paper((), 999).unwrap();
     build_graph_some_chain((), 999).unwrap();

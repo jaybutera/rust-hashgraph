@@ -108,6 +108,14 @@ pub enum OrderedEventsError {
     UndecidedRound,
 }
 
+#[derive(Error, Debug)]
+pub enum EventCreateError {
+    #[error("Failure during generation of event digest for signing")]
+    SignatureError(#[from] bincode::Error),
+    #[error("Could not push the new event")]
+    PushError(#[from] PushError),
+}
+
 pub type EventIndex<TValue> = HashMap<event::Hash, TValue>;
 
 pub struct Graph<TPayload, TSigner> {
@@ -177,11 +185,25 @@ where
         graph
     }
 
+    pub fn create_event(&mut self, payload: TPayload, other_parent: event::Hash) -> Result<event::Hash, EventCreateError> {
+        let self_parent = self.peer_latest_event(&self.self_id).expect("Peer must know itself").clone();
+        let event = Event::new(
+            payload,
+            event::Kind::Regular(Parents { self_parent, other_parent }),
+            self.self_id,
+            self.current_timestamp(),
+            |h| self.signer.sign(h)
+        )?;
+        let identifier = event.identifier().clone();
+        self.push_event(event)?;
+        Ok(identifier)
+    }
+
     /// Create and push event to the graph, adding it at the end of `author`'s lane
     /// (i.e. the event becomes the latest one of the peer).
     #[instrument(level = "error", skip_all)]
     #[instrument(level = "trace", skip(self))]
-    pub fn push_event(&mut self, event: Event<TPayload>) -> Result<event::Hash, PushError>
+    pub fn push_event(&mut self, event: Event<TPayload>) -> Result<(), PushError>
     where
         TPayload: Debug,
     {
@@ -332,7 +354,7 @@ where
         } else {
             debug!("Event is not a witness");
         }
-        Ok(hash)
+        Ok(())
     }
 
     pub fn next_event(&mut self) -> Option<&EventWrapper<TPayload>> {
@@ -625,6 +647,13 @@ where
 }
 
 impl<TPayload, TSigner> Graph<TPayload, TSigner> {
+    fn current_timestamp(&self) -> Timestamp {
+        let start = std::time::SystemTime::now();
+        start
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("Time went backwards").as_nanos()
+    }
+
     fn members_count(&self) -> usize {
         self.peer_index.keys().len()
     }

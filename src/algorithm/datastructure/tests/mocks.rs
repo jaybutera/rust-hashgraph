@@ -169,18 +169,18 @@ where
             self_parent: self_parent_event_hash.clone(),
             other_parent: other_parent_event_hash.clone(),
         };
-        let new_event_hash = graph
-            .push_event(
-                Event::new_unsigned(
-                    payload.next().expect("Iterator finished"),
-                    event::Kind::Regular(parents),
-                    *author_id,
-                    *timestamps
-                        .get(event_name)
-                        .expect(&format!("No timestamp for event {}", event_name)),
-                )
-                .expect("Failed to create event"),
-            )
+        let new_event = Event::new_unsigned(
+            payload.next().expect("Iterator finished"),
+            event::Kind::Regular(parents),
+            *author_id,
+            *timestamps
+                .get(event_name)
+                .expect(&format!("No timestamp for event {}", event_name)),
+        )
+        .expect("Failed to create event");
+        let new_event_hash = new_event.identifier().clone();
+        graph
+            .push_event(new_event)
             .map_err(|e| format!("Failer to push event {}: {}", event_name, e))?;
         peers_events
             .get_mut(&author)
@@ -214,11 +214,12 @@ where
                 .expect("Mush have own genesis")
                 .clone()
         } else {
-            // Geneses must not have timestamp 0, but why not do it for testing other components
-            graph.push_event(
-                Event::new_unsigned(payload, event::Kind::Genesis, *id, 0)
-                    .expect("Failed to create event"),
-            )?
+            // Geneses should not have timestamp 0 (?), but why not do it for testing other components
+            let next_genesis = Event::new_unsigned(payload, event::Kind::Genesis, *id, 0)
+                .expect("Failed to create event");
+            let gen_id = next_genesis.identifier().clone();
+            graph.push_event(next_genesis)?;
+            gen_id
         };
         names.insert(hash, name.to_owned());
     }
