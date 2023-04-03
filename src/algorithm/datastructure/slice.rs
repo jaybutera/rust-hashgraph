@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::algorithm::event::{self, Event};
+use crate::algorithm::event::{self, EventWrapper};
 
 use super::UnknownEvent;
 
@@ -16,9 +16,9 @@ use super::UnknownEvent;
 /// `all_events` used for lookup of events since parents are stored in hashes (in the
 /// events).
 pub struct SliceIterator<'a, TPayload, FStop> {
-    current_slice: HashSet<&'a Event<TPayload>>,
+    current_slice: HashSet<&'a EventWrapper<TPayload>>,
     stop_iterate_peer: FStop,
-    all_events: &'a HashMap<event::Hash, Event<TPayload>>,
+    all_events: &'a HashMap<event::Hash, EventWrapper<TPayload>>,
 }
 
 impl<'a, TPayload, FStop> SliceIterator<'a, TPayload, FStop>
@@ -35,7 +35,7 @@ where
     pub fn new(
         starting_slice: &HashSet<&event::Hash>,
         stop_condition: FStop,
-        all_events: &'a HashMap<event::Hash, Event<TPayload>>,
+        all_events: &'a HashMap<event::Hash, EventWrapper<TPayload>>,
     ) -> Result<Self, UnknownEvent>
     where
         TPayload: Eq + std::hash::Hash,
@@ -53,7 +53,7 @@ where
         })
     }
 
-    fn add_parents(&mut self, event: &Event<TPayload>) -> Result<(), UnknownEvent> {
+    fn add_parents(&mut self, event: &EventWrapper<TPayload>) -> Result<(), UnknownEvent> {
         if let event::Kind::Regular(parents) = event.parents() {
             let self_parent = self
                 .all_events
@@ -77,10 +77,10 @@ where
 
 impl<'a, TPayload, FStop> Iterator for SliceIterator<'a, TPayload, FStop>
 where
-    FStop: Fn(&Event<TPayload>) -> bool,
+    FStop: Fn(&EventWrapper<TPayload>) -> bool,
     TPayload: Eq + std::hash::Hash,
 {
-    type Item = &'a Event<TPayload>;
+    type Item = &'a EventWrapper<TPayload>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let next_event = self.current_slice.iter().next().cloned()?;

@@ -18,10 +18,10 @@ impl ForkIndex {
 
     pub fn track_fork<TPayload>(
         &mut self,
-        fork_parent: &event::Event<TPayload>,
+        fork_parent: &event::EventWrapper<TPayload>,
         new_fork_child: event::Hash,
     ) {
-        match self.forks.entry(fork_parent.hash().clone()) {
+        match self.forks.entry(fork_parent.inner().identifier().clone()) {
             Entry::Occupied(mut fork) => {
                 let fork = fork.get_mut();
                 fork.insert(new_fork_child);

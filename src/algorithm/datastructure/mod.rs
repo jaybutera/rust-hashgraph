@@ -4,12 +4,14 @@ use thiserror::Error;
 use tracing::{debug, error, instrument, trace, warn};
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt::Debug;
 
 use self::ordering::OrderedEvents;
 use self::peer_index::{PeerIndex, PeerIndexEntry};
 use self::slice::SliceIterator;
-use super::event::{self, Event, Parents};
-use super::{EventKind, PushError, RoundNum};
+use super::event::{self, Event, EventWrapper, Parents};
+use super::{Clock, PushError, RoundNum};
+use crate::algorithm::Signer;
 use crate::{PeerId, Timestamp};
 
 mod ordering;
@@ -106,10 +108,18 @@ pub enum OrderedEventsError {
     UndecidedRound,
 }
 
+#[derive(Error, Debug)]
+pub enum EventCreateError {
+    #[error("Failure during generation of event digest for signing")]
+    SignatureError(#[from] bincode::Error),
+    #[error("Could not push the new event")]
+    PushError(#[from] PushError),
+}
+
 pub type EventIndex<TValue> = HashMap<event::Hash, TValue>;
 
-pub struct Graph<TPayload> {
-    all_events: EventIndex<Event<TPayload>>,
+pub struct Graph<TPayload, TSigner, TClock> {
+    all_events: EventIndex<EventWrapper<TPayload>>,
     peer_index: PeerIndex,
     /// Consistent and reliable index (should be)
     round_index: Vec<HashSet<event::Hash>>,
@@ -129,17 +139,26 @@ pub struct Graph<TPayload> {
     self_id: PeerId,
     /// Coin round frequency
     coin_frequency: usize,
+
+    /// Sign events produced by us
+    signer: TSigner,
+
+    /// Make timestamps for new events
+    clock: TClock,
 }
 
-impl<TPayload> Graph<TPayload>
+impl<TPayload, TSigner, TClock> Graph<TPayload, TSigner, TClock>
 where
-    TPayload: Serialize + Eq + std::hash::Hash,
+    TPayload: Serialize + Eq + std::hash::Hash + Debug,
+    TSigner: Signer,
+    TClock: Clock,
 {
     pub fn new(
         self_id: PeerId,
         genesis_payload: TPayload,
-        genesis_timestamp: Timestamp,
         coin_frequency: usize,
+        signer: TSigner,
+        clock: TClock,
     ) -> Self {
         let mut graph = Self {
             all_events: HashMap::new(),
@@ -152,66 +171,86 @@ where
             last_known_decided_round: None,
             ordering: OrderedEvents::new(),
             coin_frequency,
+            signer,
+            clock,
         };
 
+        let genesis_timestamp = graph.clock.current_timestamp();
         graph
             .push_event(
-                genesis_payload,
-                EventKind::Genesis,
-                self_id,
-                genesis_timestamp,
+                Event::new(
+                    genesis_payload,
+                    event::Kind::Genesis,
+                    self_id,
+                    genesis_timestamp,
+                    |h| graph.signer.sign(h),
+                )
+                .expect("Invalid own genesis, can't start consensus"),
             )
             .expect("Genesis events should be valid");
         graph
     }
 
-    /// Create and push event to the graph, adding it at the end of `author`'s lane
-    /// (i.e. the event becomes the latest one of the peer).
-    #[instrument(level = "error", skip_all)]
-    #[instrument(level = "trace", skip(self, payload))]
-    pub fn push_event(
+    /// Create an event authored by this peer and push it to the local graph.
+    pub fn create_event(
         &mut self,
         payload: TPayload,
-        event_type: EventKind,
-        author: PeerId,
-        time_created: Timestamp,
-    ) -> Result<event::Hash, PushError> {
+        other_parent: event::Hash,
+    ) -> Result<event::Hash, EventCreateError> {
+        let self_parent = self
+            .peer_latest_event(&self.self_id)
+            .expect("Peer must know itself")
+            .clone();
+        let event = Event::new(
+            payload,
+            event::Kind::Regular(Parents {
+                self_parent,
+                other_parent,
+            }),
+            self.self_id,
+            self.clock.current_timestamp(),
+            |h| self.signer.sign(h),
+        )?;
+        let identifier = event.identifier().clone();
+        self.push_event(event)?;
+        Ok(identifier)
+    }
+
+    /// Create and push event to the graph, adding it at the end of `author`'s lane
+    /// (i.e. the event becomes the latest one of the peer).
+    ///
+    /// Errors are expected to leave the graph in consistent state
+    #[instrument(level = "error", skip_all)]
+    #[instrument(level = "trace", skip(self))]
+    pub fn push_event(&mut self, event: Event<TPayload>) -> Result<(), PushError>
+    where
+        TPayload: Debug,
+    {
         // Verification first, no changing state
         debug!("Validating the event");
 
         trace!("Creating an event");
-        let new_event = match event_type {
-            EventKind::Genesis => Event::new(payload, event::Kind::Genesis, author, time_created)?,
-            EventKind::Regular(Parents {
-                self_parent,
-                other_parent,
-            }) => Event::new(
-                payload,
-                event::Kind::Regular(Parents {
-                    self_parent,
-                    other_parent,
-                }),
-                author,
-                time_created,
-            )?,
-        };
-        trace!("Event hash: {}", new_event.hash());
+        let new_event = EventWrapper::new(event);
+        trace!("Event hash: {}", new_event.inner().identifier());
 
         trace!("Testing if event is already known");
-        if self.all_events.contains_key(new_event.hash()) {
-            return Err(PushError::EventAlreadyExists(new_event.hash().clone()));
+        if self.all_events.contains_key(new_event.inner().identifier()) {
+            return Err(PushError::EventAlreadyExists(
+                new_event.inner().identifier().clone(),
+            ));
         }
 
         trace!("Performing checks or updates specific to genesis or regular events");
         match new_event.parents() {
             event::Kind::Genesis => {
                 trace!("It is a genesis event");
-                if self.peer_index.contains_key(&author) {
+                if self.peer_index.contains_key(&new_event.author()) {
                     return Err(PushError::GenesisAlreadyExists);
                 }
                 debug!("The event is valid, updating state to include it");
-                let new_peer_index = PeerIndexEntry::new(new_event.hash().clone());
-                self.peer_index.insert(author, new_peer_index);
+                let new_peer_index = PeerIndexEntry::new(new_event.inner().identifier().clone());
+                self.peer_index
+                    .insert(new_event.author().clone(), new_peer_index);
             }
             event::Kind::Regular(parents) => {
                 trace!("It is a regular event");
@@ -231,23 +270,23 @@ where
 
                 // self parent must have the same author by definition
                 trace!("Author validation with self parent");
-                if self_parent_event.author() != &author {
+                if self_parent_event.author() != new_event.author() {
                     debug!(
                         "Specified self parent author ({}) differs from provided one ({})",
                         self_parent_event.author(),
-                        author
+                        new_event.author()
                     );
                     return Err(PushError::IncorrectAuthor(
                         self_parent_event.author().clone(),
-                        author,
+                        new_event.author().clone(),
                     ));
                 }
 
                 // taking mutable for update later
                 let author_index = self
                     .peer_index
-                    .get_mut(&author)
-                    .ok_or(PushError::PeerNotFound(author))?;
+                    .get_mut(&new_event.author())
+                    .ok_or(PushError::PeerNotFound(new_event.author().clone()))?;
 
                 // Insertion, should be valid at this point so that we don't leave in inconsistent state on error.
                 debug!("The event is valid, updating state to include it");
@@ -257,9 +296,27 @@ where
                 self_parent_event
                     .children
                     .self_child
-                    .add_child(new_event.hash().clone());
-                if let Err(e) = author_index.add_event(self_parent_event, new_event.hash().clone())
-                {
+                    .add_child(new_event.inner().identifier().clone());
+                // Borrow checker doesn't want to treat the parameter to add_event
+                // as immutable reference otherwise :(
+                let self_parent_event = self
+                    .all_events
+                    .get(&parents.self_parent)
+                    .expect("Just checked self parent presence");
+                if let Err(e) = author_index.add_event(
+                    |h| {
+                        self.all_events.get(h).map(|e| {
+                            let kind = e.parents();
+                            match kind {
+                                event::Kind::Genesis => vec![],
+                                event::Kind::Regular(p) => vec![&p.self_parent, &p.other_parent],
+                            }
+                        })
+                    },
+                    self_parent_event,
+                    parents.other_parent.clone(),
+                    new_event.inner().identifier().clone(),
+                ) {
                     warn!("Peer index insertion error: {}", e);
                 }
                 let other_parent_event = self
@@ -269,13 +326,13 @@ where
                 other_parent_event
                     .children
                     .other_children
-                    .push(new_event.hash().clone());
+                    .push(new_event.inner().identifier().clone());
             }
         };
 
         // Index the event and save
         trace!("Tracking the event");
-        let hash = new_event.hash().clone();
+        let hash = new_event.inner().identifier().clone();
         self.all_events.insert(hash.clone(), new_event);
 
         // Set round
@@ -316,10 +373,10 @@ where
         } else {
             debug!("Event is not a witness");
         }
-        Ok(hash)
+        Ok(())
     }
 
-    pub fn next_event(&mut self) -> Option<&Event<TPayload>> {
+    pub fn next_event(&mut self) -> Option<&EventWrapper<TPayload>> {
         self.ordering.next_event().map(|hash| {
             self.all_events
                 .get(hash)
@@ -329,9 +386,36 @@ where
 }
 
 /// Synchronization-related stuff.
-impl<TPayload> Graph<TPayload> {}
+impl<TPayload, TSigner, TClock> Graph<TPayload, TSigner, TClock>
+where
+    TPayload: Clone,
+{
+    pub fn generate_sync_for(&self, peer: &PeerId) -> Result<sync::Jobs<TPayload>, sync::Error> {
+        let empty_set = HashSet::new();
+        let peer_known_events = self
+            .peer_index
+            .get(peer)
+            .map(|index| index.known_events())
+            .unwrap_or(&empty_set);
+        let tips = self
+            .peer_index
+            .values()
+            .flat_map(|index| index.latest_events().iter())
+            .cloned();
+        sync::Jobs::generate(
+            self,
+            |h| peer_known_events.contains(h),
+            tips,
+            |h| {
+                self.all_events
+                    .get(h)
+                    .map(|wrapper| (*wrapper.inner()).clone())
+            },
+        )
+    }
+}
 
-impl<TPayload> Graph<TPayload>
+impl<TPayload, TSigner, TClock> Graph<TPayload, TSigner, TClock>
 where
     TPayload: Eq + std::hash::Hash,
 {
@@ -518,7 +602,13 @@ where
             let mut extension = vec![];
             for (peer_id, index) in &self.peer_index {
                 if !peers_hit.contains(&peer_id) {
-                    extension.push(index.latest_event());
+                    extension.push(
+                        index
+                            .latest_events()
+                            .iter()
+                            .next()
+                            .expect("At least single latest event should be present"),
+                    );
                 }
             }
             trace!(
@@ -535,7 +625,7 @@ where
         // with `round_received` less than desired.
         let iter = SliceIterator::new(
             &init_slice,
-            |event: &Event<TPayload>| match self.ordering_data(event.hash()) {
+            |event: &EventWrapper<TPayload>| match self.ordering_data(event.inner().identifier()) {
                 Ok((round_received, _, _)) => round_received < target_round_received,
                 Err(OrderingDataError::Undecided) => false,
                 Err(OrderingDataError::UnknownEvent(UnknownEvent(e))) => {
@@ -550,11 +640,11 @@ where
 
         trace!("Getting ordered events");
         for event in iter {
-            match self.ordering_data(event.hash()) {
+            match self.ordering_data(event.inner().identifier()) {
                 Ok((round_received, consensus_timestamp, event_signature)) => {
                     if round_received == target_round_received {
                         trace!("Found event with target round received");
-                        result.push((event.hash().clone(), consensus_timestamp, event_signature))
+                        result.push((event.inner().identifier().clone(), consensus_timestamp, event_signature))
                     } else {
                         trace!("Not expected round received, skipping");
                         continue;
@@ -575,14 +665,19 @@ where
     }
 }
 
-impl<TPayload> Graph<TPayload> {
+impl<TPayload, TSigner, TClock> Graph<TPayload, TSigner, TClock> {
     fn members_count(&self) -> usize {
         self.peer_index.keys().len()
     }
 
-    // for navigating the graph state externally
+    // for navigating the graph state externally (is it needed?)
     pub fn peer_latest_event(&self, peer: &PeerId) -> Option<&event::Hash> {
-        self.peer_index.get(peer).map(|e| e.latest_event())
+        self.peer_index.get(peer).map(|e| {
+            e.latest_events()
+                .iter()
+                .next()
+                .expect("At least single latest event should be present")
+        })
     }
 
     // for navigating the graph state externally
@@ -591,7 +686,7 @@ impl<TPayload> Graph<TPayload> {
     }
 
     // for navigating the graph state externally
-    pub fn event(&self, id: &event::Hash) -> Option<&event::Event<TPayload>> {
+    pub fn event(&self, id: &event::Hash) -> Option<&event::EventWrapper<TPayload>> {
         self.all_events.get(id)
     }
 
@@ -664,7 +759,7 @@ impl<TPayload> Graph<TPayload> {
                     round_witnesses
                         .iter()
                         .fold(HashSet::new(), |mut set, witness| {
-                            if self.strongly_see(event_hash, &witness.hash()) {
+                            if self.strongly_see(event_hash, &witness.inner().identifier()) {
                                 let author = witness.author();
                                 set.insert(author.clone());
                             }
@@ -722,7 +817,7 @@ impl<TPayload> Graph<TPayload> {
     }
 }
 
-impl<TPayload> Graph<TPayload> {
+impl<TPayload, TSigner, TClock> Graph<TPayload, TSigner, TClock> {
     // TODO: probably move to round field in event to avoid panics and stuff
     fn round_of(&self, event_hash: &event::Hash) -> RoundNum {
         match self.round_of.get(event_hash) {
@@ -1002,7 +1097,7 @@ impl<TPayload> Graph<TPayload> {
                         .next()
                         .expect("at least 1 self-ancestor must be present - the event itself");
                     for next_ufw_ancestor in self_ancestors {
-                        if !self.is_ancestor(next_ufw_ancestor.hash(), event_hash) {
+                        if !self.is_ancestor(next_ufw_ancestor.inner().identifier(), event_hash) {
                             break;
                         }
                         first_descendant_event_candidate = next_ufw_ancestor
@@ -1035,7 +1130,7 @@ impl<TPayload> Graph<TPayload> {
 
         self.ancestor_iter(target)
             .unwrap()
-            .any(|e| e.hash() == potential_ancestor)
+            .any(|e| e.inner().identifier() == potential_ancestor)
     }
 
     /// True if target(y) is an ancestor of observer(x), but no fork of target is an
@@ -1053,7 +1148,7 @@ impl<TPayload> Graph<TPayload> {
         let authors_seen = self
             .ancestor_iter(observer)
             .unwrap()
-            .filter(|e| self.see(&e.hash(), target))
+            .filter(|e| self.see(&e.inner().identifier(), target))
             .fold(HashSet::new(), |mut set, event| {
                 let author = event.author();
                 set.insert(author.clone());
@@ -1065,13 +1160,16 @@ impl<TPayload> Graph<TPayload> {
 }
 
 struct AncestorIter<'a, T> {
-    event_list: Vec<&'a Event<T>>,
-    all_events: &'a HashMap<event::Hash, Event<T>>,
+    event_list: Vec<&'a EventWrapper<T>>,
+    all_events: &'a HashMap<event::Hash, EventWrapper<T>>,
     visited_events: HashSet<&'a event::Hash>,
 }
 
 impl<'a, T> AncestorIter<'a, T> {
-    fn new(all_events: &'a HashMap<event::Hash, Event<T>>, ancestors_of: &'a event::Hash) -> Self {
+    fn new(
+        all_events: &'a HashMap<event::Hash, EventWrapper<T>>,
+        ancestors_of: &'a event::Hash,
+    ) -> Self {
         let mut iter = AncestorIter {
             event_list: vec![],
             all_events: all_events,
@@ -1105,7 +1203,7 @@ impl<'a, T> AncestorIter<'a, T> {
 }
 
 impl<'a, T> Iterator for AncestorIter<'a, T> {
-    type Item = &'a Event<T>;
+    type Item = &'a EventWrapper<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let event = self.event_list.pop()?;
@@ -1118,12 +1216,12 @@ impl<'a, T> Iterator for AncestorIter<'a, T> {
 }
 
 struct SelfAncestorIter<'a, T> {
-    event_list: VecDeque<&'a Event<T>>,
+    event_list: VecDeque<&'a EventWrapper<T>>,
 }
 
 impl<'a, T> SelfAncestorIter<'a, T> {
     fn new(
-        all_events: &'a HashMap<event::Hash, Event<T>>,
+        all_events: &'a HashMap<event::Hash, EventWrapper<T>>,
         ancestors_of: &'a event::Hash,
     ) -> Option<Self> {
         let mut event_list = VecDeque::new();
@@ -1142,7 +1240,7 @@ impl<'a, T> SelfAncestorIter<'a, T> {
 }
 
 impl<'a, T> Iterator for SelfAncestorIter<'a, T> {
-    type Item = &'a Event<T>;
+    type Item = &'a EventWrapper<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.event_list.pop_front()
@@ -1155,20 +1253,31 @@ impl<'a, T> DoubleEndedIterator for SelfAncestorIter<'a, T> {
     }
 }
 
-impl<TPayload> crate::common::Graph for Graph<TPayload> {
+impl<TPayload, TSigner, TClock> crate::common::Graph for Graph<TPayload, TSigner, TClock> {
     type NodeIdentifier = event::Hash;
-    type NodeIdentifiers =
-        std::iter::Flatten<std::option::IntoIter<std::vec::IntoIter<event::Hash>>>;
+    type NodeIdentifiers = Vec<event::Hash>;
 
-    fn neighbors(&self, node: &Self::NodeIdentifier) -> Self::NodeIdentifiers {
+    fn neighbors(&self, node: &Self::NodeIdentifier) -> Option<Self::NodeIdentifiers> {
+        self.all_events.get(node).map(|some_event| {
+            let mut out_neighbors: Vec<_> = some_event.children.clone().into();
+            let mut in_neighbors: Vec<_> = some_event.parents().clone().into();
+            out_neighbors.append(&mut in_neighbors);
+            out_neighbors
+        })
+    }
+}
+
+impl<TPayload, TSigner, TClock> crate::common::Directed for Graph<TPayload, TSigner, TClock> {
+    fn in_neighbors(&self, node: &Self::NodeIdentifier) -> Option<Self::NodeIdentifiers> {
         self.all_events
             .get(node)
-            .map(|some_event| {
-                let children: Vec<_> = some_event.children.clone().into();
-                children.into_iter()
-            })
-            .into_iter()
-            .flatten()
+            .map(|some_event| some_event.parents().clone().into())
+    }
+
+    fn out_neighbors(&self, node: &Self::NodeIdentifier) -> Option<Self::NodeIdentifiers> {
+        self.all_events
+            .get(node)
+            .map(|some_event| some_event.children.clone().into())
     }
 }
 
