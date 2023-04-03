@@ -11,7 +11,7 @@ pub struct PeerEvents {
 // Graph, Events by each peer, Test event names (for easier reading), Graph name
 pub struct TestSetup<T> {
     /// Graph state
-    pub graph: Graph<T, ()>,
+    pub graph: Graph<T, (), IncrementalClock>,
     /// For getting hashes for events
     pub peers_events: HashMap<String, PeerEvents>,
     /// For lookup of readable event name
@@ -21,7 +21,7 @@ pub struct TestSetup<T> {
 
 /// See [`add_events_with_timestamps`]
 fn add_events<T, TIter>(
-    graph: &mut Graph<T, ()>,
+    graph: &mut Graph<T, (), IncrementalClock>,
     events: &[(&'static str, &'static str, &'static str)],
     author_ids: HashMap<&'static str, PeerId>,
     payload: &mut TIter,
@@ -63,7 +63,7 @@ where
 ///
 /// first match is chosen
 fn add_events_with_timestamps<T, TIter>(
-    graph: &mut Graph<T, ()>,
+    graph: &mut Graph<T, (), IncrementalClock>,
     events: &[(&'static str, &'static str, &'static str)],
     author_ids: HashMap<&'static str, PeerId>,
     payload: &mut TIter,
@@ -197,7 +197,7 @@ where
 }
 
 fn add_geneses<T>(
-    graph: &mut Graph<T, ()>,
+    graph: &mut Graph<T, (), IncrementalClock>,
     this_author: &str,
     author_ids: &HashMap<&'static str, PeerId>,
     payload: T,
@@ -234,9 +234,9 @@ where
     let mut graph = Graph::new(
         *author_ids.get("a").unwrap(),
         payload,
-        0,
         coin_frequency,
         (),
+        IncrementalClock::new(),
     );
     let mut names =
         add_geneses(&mut graph, "a", &author_ids, payload).map_err(|e| format!("{}", e))?;
@@ -285,9 +285,9 @@ where
     let mut graph = Graph::new(
         *author_ids.get("g1").unwrap(),
         payload,
-        0,
         coin_frequency,
         (),
+        IncrementalClock::new(),
     );
     let mut names =
         add_geneses(&mut graph, "g1", &author_ids, payload).map_err(|e| format!("{}", e))?;
@@ -339,9 +339,9 @@ where
     let mut graph = Graph::new(
         *author_ids.get("a").unwrap(),
         payload,
-        0,
         coin_frequency,
         (),
+        IncrementalClock::new(),
     );
     let mut names =
         add_geneses(&mut graph, "a", &author_ids, payload).map_err(|e| format!("{}", e))?;
@@ -424,9 +424,9 @@ where
     let mut graph = Graph::new(
         *author_ids.get("a").unwrap(),
         payload.next().expect("Iterator finished"),
-        0,
         coin_frequency,
         (),
+        IncrementalClock::new(),
     );
     let mut names = add_geneses(
         &mut graph,
@@ -471,9 +471,9 @@ where
     let mut graph = Graph::new(
         *author_ids.get("b").unwrap(),
         payload,
-        0,
         coin_frequency,
         (),
+        IncrementalClock::new(),
     );
     let mut names =
         add_geneses(&mut graph, "b", &author_ids, payload).map_err(|e| format!("{}", e))?;

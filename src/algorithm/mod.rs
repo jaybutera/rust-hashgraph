@@ -1,7 +1,7 @@
 use blake2::{Blake2b512, Digest};
 use thiserror::Error;
 
-use crate::PeerId;
+use crate::{PeerId, Timestamp};
 
 pub mod datastructure;
 pub mod event;
@@ -26,6 +26,38 @@ impl Signer for () {
         hasher.update(message);
         let hash_slice = &hasher.finalize()[..];
         Signature::from_array(hash_slice.try_into().unwrap())
+    }
+}
+
+pub trait Clock {
+    fn current_timestamp(&mut self) -> Timestamp;
+}
+
+impl Clock for () {
+    fn current_timestamp(&mut self) -> Timestamp {
+        let start = std::time::SystemTime::now();
+        start
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_nanos()
+    }
+}
+
+pub struct IncrementalClock {
+    next_time: u128,
+}
+
+impl IncrementalClock {
+    pub fn new() -> Self {
+        Self { next_time: 0 }
+    }
+}
+
+impl Clock for IncrementalClock {
+    fn current_timestamp(&mut self) -> Timestamp {
+        let time = self.next_time;
+        self.next_time += 1;
+        time
     }
 }
 

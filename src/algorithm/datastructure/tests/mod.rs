@@ -6,6 +6,8 @@ use mocks::{
 };
 use test_utils::{run_tests, test_cases, Test};
 
+use crate::algorithm::IncrementalClock;
+
 use super::*;
 
 mod mocks;
@@ -15,10 +17,20 @@ mod test_utils;
 
 #[test]
 fn push_works() {
-    let mut graph = Graph::new(0, (), 0, 999, ());
-    
+    let mut graph = Graph::new(0, (), 999, (), IncrementalClock::new());
+
     // new event by the same author
-    let new_event = Event::new((), event::Kind::Regular(Parents { self_parent: graph.peer_latest_event(&graph.self_id).unwrap().clone(), other_parent: graph.peer_latest_event(&graph.self_id).unwrap().clone() }), graph.self_id, 1, |h| ().sign(h)).unwrap();
+    let new_event = Event::new(
+        (),
+        event::Kind::Regular(Parents {
+            self_parent: graph.peer_latest_event(&graph.self_id).unwrap().clone(),
+            other_parent: graph.peer_latest_event(&graph.self_id).unwrap().clone(),
+        }),
+        graph.self_id,
+        1,
+        |h| ().sign(h),
+    )
+    .unwrap();
     graph.push_event(new_event).unwrap();
 
     // new peer
@@ -26,23 +38,37 @@ fn push_works() {
     graph.push_event(new_event).unwrap();
 
     // new event by the new peer
-    let new_event = Event::new((), event::Kind::Regular(Parents { self_parent: graph.peer_latest_event(&1).unwrap().clone(), other_parent: graph.peer_latest_event(&graph.self_id).unwrap().clone() }), 1, 3, |h| ().sign(h)).unwrap();
+    let new_event = Event::new(
+        (),
+        event::Kind::Regular(Parents {
+            self_parent: graph.peer_latest_event(&1).unwrap().clone(),
+            other_parent: graph.peer_latest_event(&graph.self_id).unwrap().clone(),
+        }),
+        1,
+        3,
+        |h| ().sign(h),
+    )
+    .unwrap();
     graph.push_event(new_event).unwrap();
 }
 
 #[test]
 fn create_works() {
-    let mut graph = Graph::new(0, (), 0, 999, ());
-    
+    let mut graph = Graph::new(0, (), 999, (), IncrementalClock::new());
+
     // new event by the same author
-    graph.create_event((), graph.peer_latest_event(&graph.self_id).unwrap().clone()).unwrap();
+    graph
+        .create_event((), graph.peer_latest_event(&graph.self_id).unwrap().clone())
+        .unwrap();
 
     // new peer
     let new_event = Event::new((), event::Kind::Genesis, 1, 2, |h| ().sign(h)).unwrap();
     graph.push_event(new_event).unwrap();
 
     // new event by the new peer
-    graph.create_event((), graph.peer_latest_event(&1).unwrap().clone()).unwrap();
+    graph
+        .create_event((), graph.peer_latest_event(&1).unwrap().clone())
+        .unwrap();
 }
 
 #[test]
@@ -528,7 +554,7 @@ fn test_determine_round() {
 fn test_round_indices_consistent() {
     // Uses internal state, yes. Want to make sure it's consistent to avoid future problems.
     fn round_index_consistent<T>(
-        graph: &Graph<T, ()>,
+        graph: &Graph<T, (), IncrementalClock>,
         hash: &event::Hash,
     ) -> Result<usize, String> {
         let round_of_num = graph.round_of(hash);
