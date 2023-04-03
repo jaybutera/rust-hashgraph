@@ -191,6 +191,7 @@ where
         graph
     }
 
+    /// Create an event authored by this peer and push it to the local graph.
     pub fn create_event(
         &mut self,
         payload: TPayload,
@@ -217,6 +218,8 @@ where
 
     /// Create and push event to the graph, adding it at the end of `author`'s lane
     /// (i.e. the event becomes the latest one of the peer).
+    ///
+    /// Errors are expected to leave the graph in consistent state
     #[instrument(level = "error", skip_all)]
     #[instrument(level = "trace", skip(self))]
     pub fn push_event(&mut self, event: Event<TPayload>) -> Result<(), PushError>
