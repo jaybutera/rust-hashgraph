@@ -1,7 +1,7 @@
 use blake2::{Blake2b512, Digest};
 use thiserror::Error;
 
-use crate::{PeerId, Timestamp};
+use crate::Timestamp;
 
 pub mod datastructure;
 pub mod event;
@@ -62,7 +62,7 @@ impl Clock for IncrementalClock {
 }
 
 #[derive(Error, Debug)]
-pub enum PushError {
+pub enum PushError<TPeerId> {
     #[error("Each peer can have only one genesis")]
     GenesisAlreadyExists,
     #[error("Could not find specified parent in the graph. Parent hash: `{0}`")]
@@ -70,10 +70,10 @@ pub enum PushError {
     #[error("Pushed event is already present in the graph. Hash: `{0}`. Can be triggered if hashes collide for actually different events (although extremely unlikely for 512 bit hash)")]
     EventAlreadyExists(event::Hash),
     #[error("Given peer in not known ")]
-    PeerNotFound(PeerId),
+    PeerNotFound(TPeerId),
     /// `(expected, provided)`
     #[error("Provided author is different from author of self parent (expected {0}, provided {1}")]
-    IncorrectAuthor(PeerId, PeerId),
+    IncorrectAuthor(TPeerId, TPeerId),
     #[error("Serialization failed")]
     SerializationFailure(#[from] bincode::Error),
 }

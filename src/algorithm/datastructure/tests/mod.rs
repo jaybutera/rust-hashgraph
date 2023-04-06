@@ -553,8 +553,8 @@ fn test_determine_round() {
 #[test]
 fn test_round_indices_consistent() {
     // Uses internal state, yes. Want to make sure it's consistent to avoid future problems.
-    fn round_index_consistent<T>(
-        graph: &Graph<T, (), IncrementalClock>,
+    fn round_index_consistent<TPayload, TPeerId: Eq + std::hash::Hash>(
+        graph: &Graph<TPayload, TPeerId, (), IncrementalClock>,
         hash: &event::Hash,
     ) -> Result<usize, String> {
         let round_of_num = graph.round_of(hash);

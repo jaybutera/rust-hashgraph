@@ -3,14 +3,12 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use derive_getters::Getters;
 use thiserror::Error;
 
-use crate::PeerId;
-
 use self::fork_tracking::ForkIndex;
 use super::{event, EventIndex};
 
 pub mod fork_tracking;
 
-pub type PeerIndex = HashMap<PeerId, PeerIndexEntry>;
+pub type PeerIndex<TPeerId> = HashMap<TPeerId, PeerIndexEntry>;
 
 #[derive(Getters)]
 pub struct PeerIndexEntry {
@@ -51,10 +49,10 @@ impl PeerIndexEntry {
     /// `events_in_direct_sight` should return Some(_) when the queried hash is known
     /// and None if unknown (should not happen on consistent graph). It may not know
     /// about `event` yet though.
-    pub fn add_event<'a, TPayload, F>(
+    pub fn add_event<'a, TPayload, TPeerId, F>(
         &mut self,
         events_in_direct_sight: F,
-        self_parent: &event::EventWrapper<TPayload>,
+        self_parent: &event::EventWrapper<TPayload, TPeerId>,
         other_parent: event::Hash,
         event: event::Hash,
     ) -> Result<(), Error>
@@ -140,14 +138,19 @@ mod tests {
     use std::{collections::HashSet, time::Duration};
 
     // Returns the index and all_events tracker
-    fn construct_peer_index<TPayload: Clone>(
-        events: &[event::EventWrapper<TPayload>],
+    fn construct_peer_index<TPayload, TPeerId>(
+        events: &[event::EventWrapper<TPayload, TPeerId>],
     ) -> (
         PeerIndexEntry,
-        HashMap<event::Hash, event::EventWrapper<TPayload>>,
-    ) {
+        HashMap<event::Hash, event::EventWrapper<TPayload, TPeerId>>,
+    )
+    where
+        TPayload: Clone,
+        TPeerId: Clone,
+    {
         let mut events = events.into_iter();
-        let mut all_events: HashMap<event::Hash, event::EventWrapper<TPayload>> = HashMap::new();
+        let mut all_events: HashMap<event::Hash, event::EventWrapper<TPayload, TPeerId>> =
+            HashMap::new();
         let genesis = events.next().expect("event list must be nonempty");
         all_events.insert(genesis.inner().identifier().clone(), genesis.clone());
         let mut peer_index = PeerIndexEntry::new(genesis.inner().identifier().clone());

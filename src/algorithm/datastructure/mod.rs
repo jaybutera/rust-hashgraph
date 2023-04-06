@@ -12,7 +12,7 @@ use self::slice::SliceIterator;
 use super::event::{self, Event, EventWrapper, Parents};
 use super::{Clock, PushError, RoundNum};
 use crate::algorithm::Signer;
-use crate::{PeerId, Timestamp};
+use crate::Timestamp;
 
 mod ordering;
 mod peer_index;
@@ -109,18 +109,18 @@ pub enum OrderedEventsError {
 }
 
 #[derive(Error, Debug)]
-pub enum EventCreateError {
+pub enum EventCreateError<TPeerId> {
     #[error("Failure during generation of event digest for signing")]
     SignatureError(#[from] bincode::Error),
     #[error("Could not push the new event")]
-    PushError(#[from] PushError),
+    PushError(#[from] PushError<TPeerId>),
 }
 
 pub type EventIndex<TValue> = HashMap<event::Hash, TValue>;
 
-pub struct Graph<TPayload, TSigner, TClock> {
-    all_events: EventIndex<EventWrapper<TPayload>>,
-    peer_index: PeerIndex,
+pub struct Graph<TPayload, TPeerId, TSigner, TClock> {
+    all_events: EventIndex<EventWrapper<TPayload, TPeerId>>,
+    peer_index: PeerIndex<TPeerId>,
     /// Consistent and reliable index (should be)
     round_index: Vec<HashSet<event::Hash>>,
     /// Some(false) means unfamous witness
@@ -136,7 +136,7 @@ pub struct Graph<TPayload, TSigner, TClock> {
     ordering: OrderedEvents,
 
     // probably move to config later
-    self_id: PeerId,
+    self_id: TPeerId,
     /// Coin round frequency
     coin_frequency: usize,
 
@@ -147,14 +147,15 @@ pub struct Graph<TPayload, TSigner, TClock> {
     clock: TClock,
 }
 
-impl<TPayload, TSigner, TClock> Graph<TPayload, TSigner, TClock>
+impl<TPayload, TPeerId, TSigner, TClock> Graph<TPayload, TPeerId, TSigner, TClock>
 where
-    TPayload: Serialize + Eq + std::hash::Hash + Debug,
+    TPayload: Serialize + Eq + std::hash::Hash + Debug + Clone,
+    TPeerId: Serialize + Eq + std::hash::Hash + Debug + Clone,
     TSigner: Signer,
     TClock: Clock,
 {
     pub fn new(
-        self_id: PeerId,
+        self_id: TPeerId,
         genesis_payload: TPayload,
         coin_frequency: usize,
         signer: TSigner,
@@ -163,7 +164,7 @@ where
         let mut graph = Self {
             all_events: HashMap::new(),
             peer_index: HashMap::new(),
-            self_id,
+            self_id: self_id.clone(),
             round_index: vec![HashSet::new()],
             witnesses: HashMap::new(),
             round_of: HashMap::new(),
@@ -196,7 +197,7 @@ where
         &mut self,
         payload: TPayload,
         other_parent: event::Hash,
-    ) -> Result<event::Hash, EventCreateError> {
+    ) -> Result<event::Hash, EventCreateError<TPeerId>> {
         let self_parent = self
             .peer_latest_event(&self.self_id)
             .expect("Peer must know itself")
@@ -207,7 +208,7 @@ where
                 self_parent,
                 other_parent,
             }),
-            self.self_id,
+            self.self_id.clone(),
             self.clock.current_timestamp(),
             |h| self.signer.sign(h),
         )?;
@@ -222,10 +223,10 @@ where
     /// Errors are expected to leave the graph in consistent state
     #[instrument(level = "error", skip_all)]
     #[instrument(level = "trace", skip(self))]
-    pub fn push_event(&mut self, event: Event<TPayload>) -> Result<(), PushError>
-    where
-        TPayload: Debug,
-    {
+    pub fn push_event(
+        &mut self,
+        event: Event<TPayload, TPeerId>,
+    ) -> Result<(), PushError<TPeerId>> {
         // Verification first, no changing state
         debug!("Validating the event");
 
@@ -272,7 +273,7 @@ where
                 trace!("Author validation with self parent");
                 if self_parent_event.author() != new_event.author() {
                     debug!(
-                        "Specified self parent author ({}) differs from provided one ({})",
+                        "Specified self parent author ({:?}) differs from provided one ({:?})",
                         self_parent_event.author(),
                         new_event.author()
                     );
@@ -376,7 +377,7 @@ where
         Ok(())
     }
 
-    pub fn next_event(&mut self) -> Option<&EventWrapper<TPayload>> {
+    pub fn next_event(&mut self) -> Option<&EventWrapper<TPayload, TPeerId>> {
         self.ordering.next_event().map(|hash| {
             self.all_events
                 .get(hash)
@@ -386,11 +387,15 @@ where
 }
 
 /// Synchronization-related stuff.
-impl<TPayload, TSigner, TClock> Graph<TPayload, TSigner, TClock>
+impl<TPayload, TPeerId, TSigner, TClock> Graph<TPayload, TPeerId, TSigner, TClock>
 where
     TPayload: Clone,
+    TPeerId: Eq + std::hash::Hash + Clone,
 {
-    pub fn generate_sync_for(&self, peer: &PeerId) -> Result<sync::Jobs<TPayload>, sync::Error> {
+    pub fn generate_sync_for(
+        &self,
+        peer: &TPeerId,
+    ) -> Result<sync::Jobs<TPayload, TPeerId>, sync::Error> {
         let empty_set = HashSet::new();
         let peer_known_events = self
             .peer_index
@@ -415,9 +420,10 @@ where
     }
 }
 
-impl<TPayload, TSigner, TClock> Graph<TPayload, TSigner, TClock>
+impl<TPayload, TPeerId, TSigner, TClock> Graph<TPayload, TPeerId, TSigner, TClock>
 where
-    TPayload: Eq + std::hash::Hash,
+    TPayload: Eq + std::hash::Hash + Clone,
+    TPeerId: Eq + std::hash::Hash,
 {
     #[instrument(level = "debug", skip_all)]
     /// Process stuff related to event ordering.
@@ -625,7 +631,9 @@ where
         // with `round_received` less than desired.
         let iter = SliceIterator::new(
             &init_slice,
-            |event: &EventWrapper<TPayload>| match self.ordering_data(event.inner().identifier()) {
+            |event: &EventWrapper<TPayload, TPeerId>| match self
+                .ordering_data(event.inner().identifier())
+            {
                 Ok((round_received, _, _)) => round_received < target_round_received,
                 Err(OrderingDataError::Undecided) => false,
                 Err(OrderingDataError::UnknownEvent(UnknownEvent(e))) => {
@@ -665,13 +673,16 @@ where
     }
 }
 
-impl<TPayload, TSigner, TClock> Graph<TPayload, TSigner, TClock> {
+impl<TPayload, TPeerId, TSigner, TClock> Graph<TPayload, TPeerId, TSigner, TClock>
+where
+    TPeerId: Eq + std::hash::Hash,
+{
     fn members_count(&self) -> usize {
         self.peer_index.keys().len()
     }
 
     // for navigating the graph state externally (is it needed?)
-    pub fn peer_latest_event(&self, peer: &PeerId) -> Option<&event::Hash> {
+    pub fn peer_latest_event(&self, peer: &TPeerId) -> Option<&event::Hash> {
         self.peer_index.get(peer).map(|e| {
             e.latest_events()
                 .iter()
@@ -681,17 +692,20 @@ impl<TPayload, TSigner, TClock> Graph<TPayload, TSigner, TClock> {
     }
 
     // for navigating the graph state externally
-    pub fn peer_genesis(&self, peer: &PeerId) -> Option<&event::Hash> {
+    pub fn peer_genesis(&self, peer: &TPeerId) -> Option<&event::Hash> {
         self.peer_index.get(peer).map(|e| e.origin())
     }
 
     // for navigating the graph state externally
-    pub fn event(&self, id: &event::Hash) -> Option<&event::EventWrapper<TPayload>> {
+    pub fn event(&self, id: &event::Hash) -> Option<&event::EventWrapper<TPayload, TPeerId>> {
         self.all_events.get(id)
     }
 
     /// Iterator over ancestors of the event
-    fn ancestor_iter<'a>(&'a self, event_hash: &'a event::Hash) -> Option<AncestorIter<TPayload>> {
+    fn ancestor_iter<'a>(
+        &'a self,
+        event_hash: &'a event::Hash,
+    ) -> Option<AncestorIter<TPayload, TPeerId>> {
         let event = self.all_events.get(event_hash)?;
         let mut e_iter = AncestorIter::new(&self.all_events, event_hash);
 
@@ -705,7 +719,7 @@ impl<TPayload, TSigner, TClock> Graph<TPayload, TSigner, TClock> {
     fn self_ancestor_iter<'a>(
         &'a self,
         event_hash: &'a event::Hash,
-    ) -> Option<SelfAncestorIter<TPayload>> {
+    ) -> Option<SelfAncestorIter<TPayload, TPeerId>> {
         let iter = SelfAncestorIter::new(&self.all_events, event_hash);
         iter
     }
@@ -817,7 +831,10 @@ impl<TPayload, TSigner, TClock> Graph<TPayload, TSigner, TClock> {
     }
 }
 
-impl<TPayload, TSigner, TClock> Graph<TPayload, TSigner, TClock> {
+impl<TPayload, TPeerId, TSigner, TClock> Graph<TPayload, TPeerId, TSigner, TClock>
+where
+    TPeerId: Eq + std::hash::Hash,
+{
     // TODO: probably move to round field in event to avoid panics and stuff
     fn round_of(&self, event_hash: &event::Hash) -> RoundNum {
         match self.round_of.get(event_hash) {
@@ -1159,15 +1176,15 @@ impl<TPayload, TSigner, TClock> Graph<TPayload, TSigner, TClock> {
     }
 }
 
-struct AncestorIter<'a, T> {
-    event_list: Vec<&'a EventWrapper<T>>,
-    all_events: &'a HashMap<event::Hash, EventWrapper<T>>,
+struct AncestorIter<'a, T, P> {
+    event_list: Vec<&'a EventWrapper<T, P>>,
+    all_events: &'a HashMap<event::Hash, EventWrapper<T, P>>,
     visited_events: HashSet<&'a event::Hash>,
 }
 
-impl<'a, T> AncestorIter<'a, T> {
+impl<'a, T, P> AncestorIter<'a, T, P> {
     fn new(
-        all_events: &'a HashMap<event::Hash, EventWrapper<T>>,
+        all_events: &'a HashMap<event::Hash, EventWrapper<T, P>>,
         ancestors_of: &'a event::Hash,
     ) -> Self {
         let mut iter = AncestorIter {
@@ -1202,8 +1219,8 @@ impl<'a, T> AncestorIter<'a, T> {
     }
 }
 
-impl<'a, T> Iterator for AncestorIter<'a, T> {
-    type Item = &'a EventWrapper<T>;
+impl<'a, T, P> Iterator for AncestorIter<'a, T, P> {
+    type Item = &'a EventWrapper<T, P>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let event = self.event_list.pop()?;
@@ -1215,13 +1232,13 @@ impl<'a, T> Iterator for AncestorIter<'a, T> {
     }
 }
 
-struct SelfAncestorIter<'a, T> {
-    event_list: VecDeque<&'a EventWrapper<T>>,
+struct SelfAncestorIter<'a, T, P> {
+    event_list: VecDeque<&'a EventWrapper<T, P>>,
 }
 
-impl<'a, T> SelfAncestorIter<'a, T> {
+impl<'a, T, P> SelfAncestorIter<'a, T, P> {
     fn new(
-        all_events: &'a HashMap<event::Hash, EventWrapper<T>>,
+        all_events: &'a HashMap<event::Hash, EventWrapper<T, P>>,
         ancestors_of: &'a event::Hash,
     ) -> Option<Self> {
         let mut event_list = VecDeque::new();
@@ -1239,21 +1256,23 @@ impl<'a, T> SelfAncestorIter<'a, T> {
     }
 }
 
-impl<'a, T> Iterator for SelfAncestorIter<'a, T> {
-    type Item = &'a EventWrapper<T>;
+impl<'a, T, P> Iterator for SelfAncestorIter<'a, T, P> {
+    type Item = &'a EventWrapper<T, P>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.event_list.pop_front()
     }
 }
 
-impl<'a, T> DoubleEndedIterator for SelfAncestorIter<'a, T> {
+impl<'a, T, P> DoubleEndedIterator for SelfAncestorIter<'a, T, P> {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.event_list.pop_back()
     }
 }
 
-impl<TPayload, TSigner, TClock> crate::common::Graph for Graph<TPayload, TSigner, TClock> {
+impl<TPayload, TPeerId, TSigner, TClock> crate::common::Graph
+    for Graph<TPayload, TPeerId, TSigner, TClock>
+{
     type NodeIdentifier = event::Hash;
     type NodeIdentifiers = Vec<event::Hash>;
 
@@ -1267,7 +1286,9 @@ impl<TPayload, TSigner, TClock> crate::common::Graph for Graph<TPayload, TSigner
     }
 }
 
-impl<TPayload, TSigner, TClock> crate::common::Directed for Graph<TPayload, TSigner, TClock> {
+impl<TPayload, TPeerId, TSigner, TClock> crate::common::Directed
+    for Graph<TPayload, TPeerId, TSigner, TClock>
+{
     fn in_neighbors(&self, node: &Self::NodeIdentifier) -> Option<Self::NodeIdentifiers> {
         self.all_events
             .get(node)

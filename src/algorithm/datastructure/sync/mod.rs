@@ -7,8 +7,8 @@ use crate::{
     common::{Directed, Reversable},
 };
 
-pub struct Jobs<TPayload> {
-    inner: Vec<event::Event<TPayload>>,
+pub struct Jobs<TPayload, TPeerId> {
+    inner: Vec<event::Event<TPayload, TPeerId>>,
 }
 
 #[derive(Error, Debug)]
@@ -19,8 +19,8 @@ pub enum Error {
     UnknownEvent(event::Hash),
 }
 
-impl<TPayload> Jobs<TPayload> {
-    pub fn as_linear(&self) -> &Vec<event::Event<TPayload>> {
+impl<TPayload, TPeerId> Jobs<TPayload, TPeerId> {
+    pub fn as_linear(&self) -> &Vec<event::Event<TPayload, TPeerId>> {
         &self.inner
     }
 
@@ -35,7 +35,7 @@ impl<TPayload> Jobs<TPayload> {
     where
         G: Directed<NodeIdentifier = event::Hash, NodeIdentifiers = Vec<event::Hash>>,
         FKnows: Fn(&event::Hash) -> bool,
-        FEvent: Fn(&event::Hash) -> Option<event::Event<TPayload>>,
+        FEvent: Fn(&event::Hash) -> Option<event::Event<TPayload, TPeerId>>,
     {
         // We need topologically sorted subgraph of known state, that is unknown
         // to the peer. The sorting must be from the oldest to the newest events.
@@ -106,7 +106,7 @@ impl<TPayload> Jobs<TPayload> {
 
         // Prepare the jobs
         sorted.reverse();
-        let jobs: Vec<event::Event<TPayload>> = sorted
+        let jobs: Vec<event::Event<TPayload, TPeerId>> = sorted
             .into_iter()
             .map(|hash| get_event(&hash).ok_or_else(|| Error::UnknownEvent(hash)))
             .collect::<Result<_, _>>()?;

@@ -2,7 +2,7 @@ use blake2::{Blake2b512, Digest};
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 
-use crate::{PeerId, Timestamp};
+use crate::Timestamp;
 
 use super::Signature;
 
@@ -66,14 +66,14 @@ impl Hash {
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
 /// Graph event with additional metadata for navigation etc.
-pub struct EventWrapper<TPayload> {
+pub struct EventWrapper<TPayload, TPeerId> {
     // parents are inside `type_specific`, as geneses do not have ones
     pub children: Children,
-    inner: Event<TPayload>,
+    inner: Event<TPayload, TPeerId>,
 }
 
-impl<TPayload> EventWrapper<TPayload> {
-    pub fn new(inner: Event<TPayload>) -> Self {
+impl<TPayload, TPeerId> EventWrapper<TPayload, TPeerId> {
+    pub fn new(inner: Event<TPayload, TPeerId>) -> Self {
         EventWrapper {
             children: Children {
                 self_child: SelfChild::HonestParent(None),
@@ -83,7 +83,7 @@ impl<TPayload> EventWrapper<TPayload> {
         }
     }
 
-    pub fn inner(&self) -> &Event<TPayload> {
+    pub fn inner(&self) -> &Event<TPayload, TPeerId> {
         &self.inner
     }
 
@@ -91,11 +91,12 @@ impl<TPayload> EventWrapper<TPayload> {
     pub fn new_unsigned(
         payload: TPayload,
         event_kind: Kind,
-        author: PeerId,
+        author: TPeerId,
         timestamp: Timestamp,
     ) -> Result<Self, bincode::Error>
     where
         TPayload: Serialize,
+        TPeerId: Serialize,
     {
         let unsigned_event = Event::new_unsigned(payload, event_kind, author, timestamp)?;
         Ok(Self::new(unsigned_event))
@@ -103,28 +104,32 @@ impl<TPayload> EventWrapper<TPayload> {
 }
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
-pub struct Event<TPayload> {
+pub struct Event<TPayload, TPeerId> {
     /// Hash of all other fields of the event, signed by author's private key
     signature: Hash,
 
     user_payload: TPayload,
     parents: Kind,
-    author: PeerId,
+    author: TPeerId,
     /// Timestamp set by author
     timestamp: Timestamp,
 }
 
-impl<TPayload> Event<TPayload> {
+impl<TPayload, TPeerId> Event<TPayload, TPeerId> {
     pub fn identifier(&self) -> &Hash {
         &self.signature
     }
 }
 
-impl<TPayload: Serialize> Event<TPayload> {
+impl<TPayload, TPeerId> Event<TPayload, TPeerId>
+where
+    TPayload: Serialize,
+    TPeerId: Serialize,
+{
     pub fn new<F>(
         payload: TPayload,
         event_kind: Kind,
-        author: PeerId,
+        author: TPeerId,
         timestamp: Timestamp,
         sign: F,
     ) -> bincode::Result<Self>
@@ -145,7 +150,7 @@ impl<TPayload: Serialize> Event<TPayload> {
     fn digest_from_parts(
         payload: &TPayload,
         event_kind: &Kind,
-        author: &PeerId,
+        author: &TPeerId,
         timestamp: &Timestamp,
     ) -> bincode::Result<Vec<u8>> {
         let mut v = vec![];
@@ -163,7 +168,7 @@ impl<TPayload: Serialize> Event<TPayload> {
     fn calculate_signature<F>(
         payload: &TPayload,
         event_kind: &Kind,
-        author: &PeerId,
+        author: &TPeerId,
         timestamp: &Timestamp,
         sign: F,
     ) -> bincode::Result<Hash>
@@ -185,7 +190,7 @@ impl<TPayload: Serialize> Event<TPayload> {
     pub fn new_unsigned(
         payload: TPayload,
         event_kind: Kind,
-        author: PeerId,
+        author: TPeerId,
         timestamp: Timestamp,
     ) -> Result<Self, bincode::Error>
     where
@@ -297,7 +302,7 @@ impl Into<Vec<Hash>> for Kind {
     }
 }
 
-impl<TPayload> EventWrapper<TPayload> {
+impl<TPayload, TPeerId> EventWrapper<TPayload, TPeerId> {
     // TODO: actually have signature
     pub fn signature(&self) -> &Signature {
         self.inner.identifier()
@@ -311,7 +316,7 @@ impl<TPayload> EventWrapper<TPayload> {
         &self.inner.user_payload
     }
 
-    pub fn author(&self) -> &PeerId {
+    pub fn author(&self) -> &TPeerId {
         &self.inner.author
     }
 
@@ -328,7 +333,7 @@ mod tests {
 
     use super::*;
 
-    fn create_events() -> Result<Vec<EventWrapper<i32>>, bincode::Error> {
+    fn create_events() -> Result<Vec<EventWrapper<i32, u64>>, bincode::Error> {
         let mock_parents_1 = Parents {
             self_parent: Hash {
                 inner: hex!(

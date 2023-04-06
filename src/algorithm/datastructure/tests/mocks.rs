@@ -2,39 +2,42 @@ use std::{hash::Hash, iter::repeat};
 
 use super::*;
 
+pub type MockPeerId = u64;
+
 #[derive(Clone)]
-pub struct PeerEvents {
-    pub id: PeerId,
+pub struct PeerEvents<TPeerId> {
+    pub id: TPeerId,
     pub events: Vec<event::Hash>,
 }
 
 // Graph, Events by each peer, Test event names (for easier reading), Graph name
-pub struct TestSetup<T> {
+pub struct TestSetup<TPayload, TPeerId> {
     /// Graph state
-    pub graph: Graph<T, (), IncrementalClock>,
+    pub graph: Graph<TPayload, TPeerId, (), IncrementalClock>,
     /// For getting hashes for events
-    pub peers_events: HashMap<String, PeerEvents>,
+    pub peers_events: HashMap<String, PeerEvents<TPeerId>>,
     /// For lookup of readable event name
     pub names: HashMap<event::Hash, String>,
     pub setup_name: String,
 }
 
 /// See [`add_events_with_timestamps`]
-fn add_events<T, TIter>(
-    graph: &mut Graph<T, (), IncrementalClock>,
+fn add_events<TPayload, TPeerId, TIter>(
+    graph: &mut Graph<TPayload, TPeerId, (), IncrementalClock>,
     events: &[(&'static str, &'static str, &'static str)],
-    author_ids: HashMap<&'static str, PeerId>,
+    author_ids: HashMap<&'static str, TPeerId>,
     payload: &mut TIter,
 ) -> Result<
     (
-        HashMap<String, PeerEvents>,
+        HashMap<String, PeerEvents<TPeerId>>,
         HashMap<event::Hash, String>, // hash -> event_name
     ),
     String,
 >
 where
-    T: Serialize + Copy + Default + Eq + Hash + Debug,
-    TIter: Iterator<Item = T>,
+    TPayload: Serialize + Copy + Default + Eq + Hash + Debug,
+    TPeerId: Serialize + Eq + std::hash::Hash + Debug + Clone,
+    TIter: Iterator<Item = TPayload>,
 {
     let timestamps = events.iter().map(|&(name, _, _)| (name, 0)).collect();
     add_events_with_timestamps(graph, events, author_ids, payload, timestamps)
@@ -62,21 +65,22 @@ where
 /// * name of peer for **its genesis**
 ///
 /// first match is chosen
-fn add_events_with_timestamps<T, TIter>(
-    graph: &mut Graph<T, (), IncrementalClock>,
+fn add_events_with_timestamps<T, TPeerId, TIter>(
+    graph: &mut Graph<T, TPeerId, (), IncrementalClock>,
     events: &[(&'static str, &'static str, &'static str)],
-    author_ids: HashMap<&'static str, PeerId>,
+    author_ids: HashMap<&'static str, TPeerId>,
     payload: &mut TIter,
     timestamps: HashMap<&'static str, Timestamp>,
 ) -> Result<
     (
-        HashMap<String, PeerEvents>,
+        HashMap<String, PeerEvents<TPeerId>>,
         HashMap<event::Hash, String>, // hash -> event_name
     ),
     String,
 >
 where
     T: Serialize + Copy + Default + Eq + Hash + Debug,
+    TPeerId: Serialize + Eq + std::hash::Hash + Debug + Clone,
     TIter: Iterator<Item = T>,
 {
     let mut inserted_events = HashMap::with_capacity(events.len());
@@ -86,20 +90,20 @@ where
             key,
             graph
                 .peer_genesis(&peer_id)
-                .expect(&format!("Incorrect peer id: {}", peer_id))
+                .expect(&format!("Incorrect peer id: {:?}", peer_id))
                 .clone(),
         );
     }
-    let mut peers_events: HashMap<String, PeerEvents> = author_ids
+    let mut peers_events: HashMap<String, PeerEvents<TPeerId>> = author_ids
         .keys()
         .map(|&name| {
-            let id = *author_ids
+            let id = author_ids
                 .get(name)
-                .expect(&format!("Unknown author name '{}'", name));
-            let genesis = graph.peer_genesis(&id).expect(&format!(
-                "Unknown author id to graph '{}' (name {})",
-                id, name
-            ));
+                .expect(&format!("Unknown author name '{}'", name))
+                .clone();
+            let genesis = graph
+                .peer_genesis(&id)
+                .expect(&format!("Unknown author id '{:?}' (name {})", id, name));
             (
                 name.to_owned(),
                 PeerEvents {
@@ -113,7 +117,7 @@ where
     for &(event_name, self_parent_str, other_parent_event) in events {
         let other_parent_event_hash = match author_ids.get(other_parent_event) {
             Some(h) => graph.peer_genesis(h).expect(&format!(
-                "Unknown peer id {} to graph (name '{}')",
+                "Unknown peer id {:?} to graph (name '{}')",
                 h, self_parent_str
             )),
             None => inserted_events
@@ -133,7 +137,7 @@ where
                     .get(author_name)
                     .expect(&format!("Unknown author name '{}'", author_name));
                 let self_parent = graph.peer_genesis(author_id).expect(&format!(
-                    "Unknown author id of '{}': {}",
+                    "Unknown author id of '{}': {:?}",
                     author_name, author_id
                 ));
                 let author_name = self_parent_str
@@ -172,7 +176,7 @@ where
         let new_event = Event::new_unsigned(
             payload.next().expect("Iterator finished"),
             event::Kind::Regular(parents),
-            *author_id,
+            author_id.clone(),
             *timestamps
                 .get(event_name)
                 .expect(&format!("No timestamp for event {}", event_name)),
@@ -181,7 +185,7 @@ where
         let new_event_hash = new_event.identifier().clone();
         graph
             .push_event(new_event)
-            .map_err(|e| format!("Failer to push event {}: {}", event_name, e))?;
+            .map_err(|e| format!("Failer to push event {}: {:?}", event_name, e))?;
         peers_events
             .get_mut(&author)
             .expect(&format!("Author '{}' should be in the index", author))
@@ -196,14 +200,15 @@ where
     Ok((peers_events, names))
 }
 
-fn add_geneses<T>(
-    graph: &mut Graph<T, (), IncrementalClock>,
+fn add_geneses<TPayload, TPeerId>(
+    graph: &mut Graph<TPayload, TPeerId, (), IncrementalClock>,
     this_author: &str,
-    author_ids: &HashMap<&'static str, PeerId>,
-    payload: T,
-) -> Result<HashMap<event::Hash, String>, PushError>
+    author_ids: &HashMap<&'static str, TPeerId>,
+    payload: TPayload,
+) -> Result<HashMap<event::Hash, String>, PushError<TPeerId>>
 where
-    T: Serialize + Copy + Eq + Hash + Debug,
+    TPayload: Serialize + Copy + Eq + Hash + Debug,
+    TPeerId: Serialize + Eq + std::hash::Hash + Debug + Clone,
 {
     let mut names = HashMap::with_capacity(author_ids.len());
 
@@ -215,7 +220,7 @@ where
                 .clone()
         } else {
             // Geneses should not have timestamp 0 (?), but why not do it for testing other components
-            let next_genesis = Event::new_unsigned(payload, event::Kind::Genesis, *id, 0)
+            let next_genesis = Event::new_unsigned(payload, event::Kind::Genesis, id.clone(), 0)
                 .expect("Failed to create event");
             let gen_id = next_genesis.identifier().clone();
             graph.push_event(next_genesis)?;
@@ -226,7 +231,10 @@ where
     Ok(names)
 }
 
-pub fn build_graph_from_paper<T>(payload: T, coin_frequency: usize) -> Result<TestSetup<T>, String>
+pub fn build_graph_from_paper<T>(
+    payload: T,
+    coin_frequency: usize,
+) -> Result<TestSetup<T, MockPeerId>, String>
 where
     T: Serialize + Copy + Default + Eq + Hash + Debug,
 {
@@ -266,7 +274,10 @@ where
     })
 }
 
-pub fn build_graph_some_chain<T>(payload: T, coin_frequency: usize) -> Result<TestSetup<T>, String>
+pub fn build_graph_some_chain<T>(
+    payload: T,
+    coin_frequency: usize,
+) -> Result<TestSetup<T, MockPeerId>, String>
 where
     T: Serialize + Copy + Default + Eq + Hash + Debug,
 {
@@ -315,7 +326,7 @@ where
 pub fn build_graph_detailed_example<T>(
     payload: T,
     coin_frequency: usize,
-) -> Result<TestSetup<T>, String>
+) -> Result<TestSetup<T, MockPeerId>, String>
 where
     T: Serialize + Copy + Default + Eq + Hash + Debug,
 {
@@ -326,7 +337,7 @@ pub fn build_graph_detailed_example_with_timestamps<T, TIter>(
     payload: T,
     coin_frequency: usize,
     mut timestamp_generator: TIter,
-) -> Result<TestSetup<T>, String>
+) -> Result<TestSetup<T, MockPeerId>, String>
 where
     T: Serialize + Copy + Default + Eq + Hash + Debug,
     TIter: Iterator<Item = Timestamp>,
@@ -412,7 +423,7 @@ where
 pub fn build_graph_fork<T, TIter>(
     mut payload: TIter,
     coin_frequency: usize,
-) -> Result<TestSetup<T>, String>
+) -> Result<TestSetup<T, MockPeerId>, String>
 where
     T: Serialize + Copy + Default + Eq + Hash + Debug,
     TIter: Iterator<Item = T>,
@@ -461,7 +472,10 @@ where
     })
 }
 
-pub fn build_graph_index_test<T>(payload: T, coin_frequency: usize) -> Result<TestSetup<T>, String>
+pub fn build_graph_index_test<T>(
+    payload: T,
+    coin_frequency: usize,
+) -> Result<TestSetup<T, MockPeerId>, String>
 where
     T: Serialize + Copy + Default + Eq + Hash + Debug,
 {

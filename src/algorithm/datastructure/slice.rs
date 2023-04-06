@@ -15,15 +15,16 @@ use super::UnknownEvent;
 ///
 /// `all_events` used for lookup of events since parents are stored in hashes (in the
 /// events).
-pub struct SliceIterator<'a, TPayload, FStop> {
-    current_slice: HashSet<&'a EventWrapper<TPayload>>,
+pub struct SliceIterator<'a, TPayload, TPeerId, FStop> {
+    current_slice: HashSet<&'a EventWrapper<TPayload, TPeerId>>,
     stop_iterate_peer: FStop,
-    all_events: &'a HashMap<event::Hash, EventWrapper<TPayload>>,
+    all_events: &'a HashMap<event::Hash, EventWrapper<TPayload, TPeerId>>,
 }
 
-impl<'a, TPayload, FStop> SliceIterator<'a, TPayload, FStop>
+impl<'a, TPayload, TPeerId, FStop> SliceIterator<'a, TPayload, TPeerId, FStop>
 where
     TPayload: Eq + std::hash::Hash,
+    TPeerId: Eq + std::hash::Hash,
 {
     /// Create iterator over graph slice.
     ///
@@ -35,7 +36,7 @@ where
     pub fn new(
         starting_slice: &HashSet<&event::Hash>,
         stop_condition: FStop,
-        all_events: &'a HashMap<event::Hash, EventWrapper<TPayload>>,
+        all_events: &'a HashMap<event::Hash, EventWrapper<TPayload, TPeerId>>,
     ) -> Result<Self, UnknownEvent>
     where
         TPayload: Eq + std::hash::Hash,
@@ -53,7 +54,7 @@ where
         })
     }
 
-    fn add_parents(&mut self, event: &EventWrapper<TPayload>) -> Result<(), UnknownEvent> {
+    fn add_parents(&mut self, event: &EventWrapper<TPayload, TPeerId>) -> Result<(), UnknownEvent> {
         if let event::Kind::Regular(parents) = event.parents() {
             let self_parent = self
                 .all_events
@@ -75,12 +76,13 @@ where
     }
 }
 
-impl<'a, TPayload, FStop> Iterator for SliceIterator<'a, TPayload, FStop>
+impl<'a, TPayload, TPeerId, FStop> Iterator for SliceIterator<'a, TPayload, TPeerId, FStop>
 where
-    FStop: Fn(&EventWrapper<TPayload>) -> bool,
+    FStop: Fn(&EventWrapper<TPayload, TPeerId>) -> bool,
     TPayload: Eq + std::hash::Hash,
+    TPeerId: Eq + std::hash::Hash,
 {
-    type Item = &'a EventWrapper<TPayload>;
+    type Item = &'a EventWrapper<TPayload, TPeerId>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let next_event = self.current_slice.iter().next().cloned()?;
