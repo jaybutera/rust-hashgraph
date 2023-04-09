@@ -26,7 +26,7 @@ impl<TPayload, TPeerId> Jobs<TPayload, TPeerId> {
 
     /// Generate jobs for the peer to perform in order to achieve at least the same
     /// state as ours.
-    pub fn generate<G, FKnows, FEvent>(
+    pub(crate) fn generate<G, FKnows, FEvent>(
         known_state: G,
         peer_knows_event: FKnows,
         known_state_tips: impl Iterator<Item = event::Hash>,

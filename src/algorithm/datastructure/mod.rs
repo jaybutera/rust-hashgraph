@@ -17,7 +17,7 @@ use crate::Timestamp;
 mod ordering;
 mod peer_index;
 mod slice;
-mod sync;
+pub mod sync;
 
 #[derive(Debug, PartialEq, Clone)]
 enum WitnessFamousness {
