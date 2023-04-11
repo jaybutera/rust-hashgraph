@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::algorithm::{datastructure::Graph, event, IncrementalClock};
+use crate::algorithm::{datastructure::Graph, event, IncrementalClock, MockSigner};
 
 use super::mocks::TestSetup;
 
@@ -256,7 +256,7 @@ pub(crate) fn test_cases<TPayload, TPeerId, TArg, TResult, F, FNameLookup>(
     tested_function: F,
     name_lookup: FNameLookup,
 ) where
-    F: Fn(&mut Graph<TPayload, TPeerId, (), IncrementalClock>, &TArg) -> TResult,
+    F: Fn(&mut Graph<TPayload, TPeerId, MockSigner<TPeerId>, IncrementalClock>, &TArg) -> TResult,
     TResult: PartialEq + std::fmt::Debug,
     FNameLookup: Fn(&HashMap<event::Hash, String>, &TArg) -> String,
 {

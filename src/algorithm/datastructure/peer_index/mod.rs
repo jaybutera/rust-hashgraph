@@ -194,7 +194,7 @@ mod tests {
         let start_time = Duration::from_secs(0);
 
         // Since we work with actual events, we can't use our sample hashes.
-        let event_a = event::EventWrapper::new_unsigned(
+        let event_a = event::EventWrapper::new_fakely_signed(
             (),
             event::Kind::Genesis,
             peer,
@@ -203,7 +203,7 @@ mod tests {
         .unwrap();
         let a_hash = event_a.inner().identifier().clone();
 
-        let event_b = event::EventWrapper::new_unsigned(
+        let event_b = event::EventWrapper::new_fakely_signed(
             (),
             event::Kind::Regular(event::Parents {
                 self_parent: a_hash.clone(),
@@ -216,7 +216,7 @@ mod tests {
         .unwrap();
         let b_hash = event_b.inner().identifier().clone();
 
-        let event_c = event::EventWrapper::new_unsigned(
+        let event_c = event::EventWrapper::new_fakely_signed(
             (),
             event::Kind::Regular(event::Parents {
                 self_parent: b_hash.clone(),
@@ -228,7 +228,7 @@ mod tests {
         )
         .unwrap();
 
-        let event_d = event::EventWrapper::new_unsigned(
+        let event_d = event::EventWrapper::new_fakely_signed(
             (),
             event::Kind::Regular(event::Parents {
                 self_parent: b_hash.clone(),
@@ -240,7 +240,7 @@ mod tests {
         )
         .unwrap();
 
-        let event_e = event::EventWrapper::new_unsigned(
+        let event_e = event::EventWrapper::new_fakely_signed(
             (),
             event::Kind::Regular(event::Parents {
                 self_parent: b_hash.clone(),
@@ -252,7 +252,7 @@ mod tests {
         )
         .unwrap();
 
-        let event_f = event::EventWrapper::new_unsigned(
+        let event_f = event::EventWrapper::new_fakely_signed(
             (),
             event::Kind::Regular(event::Parents {
                 self_parent: a_hash.clone(),

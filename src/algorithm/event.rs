@@ -1,6 +1,7 @@
 use blake2::{Blake2b512, Digest};
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
+use thiserror::Error;
 
 use crate::Timestamp;
 
@@ -64,16 +65,16 @@ impl Hash {
     }
 }
 
-#[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
-/// Graph event with additional metadata for navigation etc.
+/// Event with unsigned metadata for navigation.
+#[derive(Eq, PartialEq, Hash, Clone, Debug)]
 pub struct EventWrapper<TPayload, TPeerId> {
     // parents are inside `type_specific`, as geneses do not have ones
     pub children: Children,
-    inner: Event<TPayload, TPeerId>,
+    inner: SignedEvent<TPayload, TPeerId>,
 }
 
 impl<TPayload, TPeerId> EventWrapper<TPayload, TPeerId> {
-    pub fn new(inner: Event<TPayload, TPeerId>) -> Self {
+    pub fn new(inner: SignedEvent<TPayload, TPeerId>) -> Self {
         EventWrapper {
             children: Children {
                 self_child: SelfChild::HonestParent(None),
@@ -83,12 +84,16 @@ impl<TPayload, TPeerId> EventWrapper<TPayload, TPeerId> {
         }
     }
 
-    pub fn inner(&self) -> &Event<TPayload, TPeerId> {
+    pub fn inner(&self) -> &SignedEvent<TPayload, TPeerId> {
         &self.inner
     }
 
+    /// Event with signature that is just its hash. Does not involve any actual
+    /// signing process.
+    ///
+    /// **Use just for testing.**
     #[cfg(test)]
-    pub fn new_unsigned(
+    pub fn new_fakely_signed(
         payload: TPayload,
         event_kind: Kind,
         author: TPeerId,
@@ -98,30 +103,46 @@ impl<TPayload, TPeerId> EventWrapper<TPayload, TPeerId> {
         TPayload: Serialize,
         TPeerId: Serialize,
     {
-        let unsigned_event = Event::new_unsigned(payload, event_kind, author, timestamp)?;
+        let unsigned_event =
+            SignedEvent::new_fakely_signed(payload, event_kind, author, timestamp)?;
         Ok(Self::new(unsigned_event))
     }
 }
 
-#[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
-pub struct Event<TPayload, TPeerId> {
-    /// Hash of all other fields of the event, signed by author's private key
+#[derive(Eq, PartialEq, Hash, Clone, Debug)]
+pub struct SignedEvent<TPayload, TPeerId> {
+    fields: UnsignedEvent<TPayload, TPeerId>,
+    /// Hash of the fields of the event, signed by author's private key
     signature: Hash,
-
-    user_payload: TPayload,
-    parents: Kind,
-    author: TPeerId,
-    /// Timestamp set by author
-    timestamp: Timestamp,
 }
 
-impl<TPayload, TPeerId> Event<TPayload, TPeerId> {
+#[derive(Debug, Error)]
+pub enum WithSignatureCreationError {
+    #[error(transparent)]
+    DigestError(#[from] bincode::Error),
+    #[error("Signature provided does not match event contents and author")]
+    InvalidSignature,
+}
+
+impl<TPayload, TPeerId> SignedEvent<TPayload, TPeerId> {
     pub fn identifier(&self) -> &Hash {
         &self.signature
     }
+
+    pub fn signature(&self) -> &Hash {
+        &self.signature
+    }
+
+    pub fn fields(&self) -> &UnsignedEvent<TPayload, TPeerId> {
+        &self.fields
+    }
+
+    pub fn into_parts(self) -> (UnsignedEvent<TPayload, TPeerId>, Signature) {
+        (self.fields, self.signature)
+    }
 }
 
-impl<TPayload, TPeerId> Event<TPayload, TPeerId>
+impl<TPayload, TPeerId> SignedEvent<TPayload, TPeerId>
 where
     TPayload: Serialize,
     TPeerId: Serialize,
@@ -136,49 +157,47 @@ where
     where
         F: FnOnce(&[u8]) -> Hash,
     {
-        let signature =
-            Self::calculate_signature(&payload, &event_kind, &author, &timestamp, sign)?;
-        Ok(Event {
-            signature,
+        let unsigned_event = UnsignedEvent {
             user_payload: payload,
             parents: event_kind,
             author,
             timestamp,
+        };
+        let signature = Self::calculate_signature(&unsigned_event, sign)?;
+        Ok(SignedEvent {
+            fields: unsigned_event,
+            signature,
         })
     }
 
-    fn digest_from_parts(
-        payload: &TPayload,
-        event_kind: &Kind,
-        author: &TPeerId,
-        timestamp: &Timestamp,
-    ) -> bincode::Result<Vec<u8>> {
-        let mut v = vec![];
-        let payload_bytes = bincode::serialize(&payload)?;
-        v.extend(payload_bytes);
-        let kind_bytes = bincode::serialize(&event_kind)?;
-        v.extend(kind_bytes);
-        let author_bytes = bincode::serialize(&author)?;
-        v.extend(author_bytes);
-        let timestamp_bytes = bincode::serialize(&timestamp)?;
-        v.extend(timestamp_bytes);
-        Ok(v)
+    pub fn with_signature<F>(
+        unsigned_event: UnsignedEvent<TPayload, TPeerId>,
+        signature: Signature,
+        verify_signature: F,
+    ) -> Result<Self, WithSignatureCreationError>
+    where
+        F: FnOnce(&Vec<u8>, &Signature, &TPeerId) -> bool,
+    {
+        let digest = unsigned_event.digest()?;
+        if verify_signature(&digest, &signature, &unsigned_event.author) {
+            Ok(SignedEvent {
+                fields: unsigned_event,
+                signature,
+            })
+        } else {
+            Err(WithSignatureCreationError::InvalidSignature)
+        }
     }
 
     fn calculate_signature<F>(
-        payload: &TPayload,
-        event_kind: &Kind,
-        author: &TPeerId,
-        timestamp: &Timestamp,
+        unsigned_event: &UnsignedEvent<TPayload, TPeerId>,
         sign: F,
     ) -> bincode::Result<Hash>
     where
         F: FnOnce(&[u8]) -> Hash,
     {
         let mut hasher = Blake2b512::new();
-        hasher.update(Self::digest_from_parts(
-            payload, event_kind, author, timestamp,
-        )?);
+        hasher.update(unsigned_event.digest()?);
         let hash_slice = &hasher.finalize()[..];
         let signature = sign(hash_slice);
         // Should be compiler checkable but the developers of the library
@@ -187,7 +206,7 @@ where
     }
 
     #[cfg(test)]
-    pub fn new_unsigned(
+    pub fn new_fakely_signed(
         payload: TPayload,
         event_kind: Kind,
         author: TPeerId,
@@ -201,6 +220,34 @@ where
                 .try_into()
                 .expect("Fixed hash function must return same result length"),
         })
+    }
+}
+
+#[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
+pub struct UnsignedEvent<TPayload, TPeerId> {
+    user_payload: TPayload,
+    parents: Kind,
+    author: TPeerId,
+    /// Timestamp set by author
+    timestamp: Timestamp,
+}
+
+impl<TPayload, TPeerId> UnsignedEvent<TPayload, TPeerId>
+where
+    TPayload: Serialize,
+    TPeerId: Serialize,
+{
+    fn digest(&self) -> bincode::Result<Vec<u8>> {
+        let mut v = vec![];
+        let payload_bytes = bincode::serialize(&self.user_payload)?;
+        v.extend(payload_bytes);
+        let kind_bytes = bincode::serialize(&self.parents)?;
+        v.extend(kind_bytes);
+        let author_bytes = bincode::serialize(&self.author)?;
+        v.extend(author_bytes);
+        let timestamp_bytes = bincode::serialize(&self.timestamp)?;
+        v.extend(timestamp_bytes);
+        Ok(v)
     }
 }
 
@@ -309,19 +356,19 @@ impl<TPayload, TPeerId> EventWrapper<TPayload, TPeerId> {
     }
 
     pub fn parents(&self) -> &Kind {
-        &self.inner.parents
+        &self.inner.fields.parents
     }
 
     pub fn payload(&self) -> &TPayload {
-        &self.inner.user_payload
+        &self.inner.fields.user_payload
     }
 
     pub fn author(&self) -> &TPeerId {
-        &self.inner.author
+        &self.inner.fields.author
     }
 
     pub fn timestamp(&self) -> &u128 {
-        &self.inner.timestamp
+        &self.inner.fields.timestamp
     }
 }
 
@@ -363,11 +410,11 @@ mod tests {
             },
         };
         let results = vec![
-            EventWrapper::new_unsigned(0, Kind::Genesis, 0, 0)?,
-            EventWrapper::new_unsigned(0, Kind::Genesis, 1, 0)?,
-            EventWrapper::new_unsigned(0, Kind::Regular(mock_parents_1.clone()), 0, 0)?,
-            EventWrapper::new_unsigned(0, Kind::Regular(mock_parents_2.clone()), 0, 0)?,
-            EventWrapper::new_unsigned(
+            EventWrapper::new_fakely_signed(0, Kind::Genesis, 0, 0)?,
+            EventWrapper::new_fakely_signed(0, Kind::Genesis, 1, 0)?,
+            EventWrapper::new_fakely_signed(0, Kind::Regular(mock_parents_1.clone()), 0, 0)?,
+            EventWrapper::new_fakely_signed(0, Kind::Regular(mock_parents_2.clone()), 0, 0)?,
+            EventWrapper::new_fakely_signed(
                 0,
                 Kind::Regular(Parents {
                     self_parent: mock_parents_1.self_parent.clone(),
@@ -376,7 +423,7 @@ mod tests {
                 0,
                 0,
             )?,
-            EventWrapper::new_unsigned(
+            EventWrapper::new_fakely_signed(
                 0,
                 Kind::Regular(Parents {
                     self_parent: mock_parents_2.self_parent.clone(),
@@ -385,8 +432,8 @@ mod tests {
                 0,
                 0,
             )?,
-            EventWrapper::new_unsigned(1234567, Kind::Genesis, 0, 0)?,
-            EventWrapper::new_unsigned(1234567, Kind::Regular(mock_parents_1.clone()), 0, 1)?,
+            EventWrapper::new_fakely_signed(1234567, Kind::Genesis, 0, 0)?,
+            EventWrapper::new_fakely_signed(1234567, Kind::Regular(mock_parents_1.clone()), 0, 1)?,
         ];
         Ok(results)
     }
@@ -395,11 +442,11 @@ mod tests {
     fn events_create() {
         create_events().unwrap();
         // also test on various payloads
-        EventWrapper::new_unsigned((), Kind::Genesis, 0, 0).unwrap();
-        EventWrapper::new_unsigned((0,), Kind::Genesis, 0, 0).unwrap();
-        EventWrapper::new_unsigned(vec![()], Kind::Genesis, 0, 0).unwrap();
-        EventWrapper::new_unsigned("asdassa", Kind::Genesis, 0, 0).unwrap();
-        EventWrapper::new_unsigned("asdassa".to_owned(), Kind::Genesis, 0, 0).unwrap();
+        EventWrapper::new_fakely_signed((), Kind::Genesis, 0, 0).unwrap();
+        EventWrapper::new_fakely_signed((0,), Kind::Genesis, 0, 0).unwrap();
+        EventWrapper::new_fakely_signed(vec![()], Kind::Genesis, 0, 0).unwrap();
+        EventWrapper::new_fakely_signed("asdassa", Kind::Genesis, 0, 0).unwrap();
+        EventWrapper::new_fakely_signed("asdassa".to_owned(), Kind::Genesis, 0, 0).unwrap();
     }
 
     #[test]

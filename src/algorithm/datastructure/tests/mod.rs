@@ -6,7 +6,7 @@ use mocks::{
 };
 use test_utils::{run_tests, test_cases, Test};
 
-use crate::algorithm::IncrementalClock;
+use crate::algorithm::{IncrementalClock, MockSigner};
 
 use super::*;
 
@@ -17,10 +17,10 @@ mod test_utils;
 
 #[test]
 fn push_works() {
-    let mut graph = Graph::new(0, (), 999, (), IncrementalClock::new());
+    let mut graph = Graph::new(0, (), 999, MockSigner::new(), IncrementalClock::new());
 
     // new event by the same author
-    let new_event = Event::new(
+    let new_event = SignedEvent::new(
         (),
         event::Kind::Regular(Parents {
             self_parent: graph.peer_latest_event(&graph.self_id).unwrap().clone(),
@@ -28,17 +28,22 @@ fn push_works() {
         }),
         graph.self_id,
         1,
-        |h| ().sign(h),
+        |h| MockSigner::<i32>::new().sign(h),
     )
     .unwrap();
-    graph.push_event(new_event).unwrap();
+    let (unsigned, signature) = new_event.into_parts();
+    graph.push_event(unsigned, signature).unwrap();
 
     // new peer
-    let new_event = Event::new((), event::Kind::Genesis, 1, 2, |h| ().sign(h)).unwrap();
-    graph.push_event(new_event).unwrap();
+    let new_event = SignedEvent::new((), event::Kind::Genesis, 1, 2, |h| {
+        MockSigner::<i32>::new().sign(h)
+    })
+    .unwrap();
+    let (unsigned, signature) = new_event.into_parts();
+    graph.push_event(unsigned, signature).unwrap();
 
     // new event by the new peer
-    let new_event = Event::new(
+    let new_event = SignedEvent::new(
         (),
         event::Kind::Regular(Parents {
             self_parent: graph.peer_latest_event(&1).unwrap().clone(),
@@ -46,15 +51,22 @@ fn push_works() {
         }),
         1,
         3,
-        |h| ().sign(h),
+        |h| MockSigner::<i32>::new().sign(h),
     )
     .unwrap();
-    graph.push_event(new_event).unwrap();
+    let (unsigned, signature) = new_event.into_parts();
+    graph.push_event(unsigned, signature).unwrap();
 }
 
 #[test]
 fn create_works() {
-    let mut graph = Graph::new(0, (), 999, (), IncrementalClock::new());
+    let mut graph = Graph::new(
+        0,
+        (),
+        999,
+        MockSigner::<i32>::new(),
+        IncrementalClock::new(),
+    );
 
     // new event by the same author
     graph
@@ -62,8 +74,12 @@ fn create_works() {
         .unwrap();
 
     // new peer
-    let new_event = Event::new((), event::Kind::Genesis, 1, 2, |h| ().sign(h)).unwrap();
-    graph.push_event(new_event).unwrap();
+    let new_event = SignedEvent::new((), event::Kind::Genesis, 1, 2, |h| {
+        MockSigner::<i32>::new().sign(h)
+    })
+    .unwrap();
+    let (unsigned, signature) = new_event.into_parts();
+    graph.push_event(unsigned, signature).unwrap();
 
     // new event by the new peer
     graph
@@ -89,8 +105,13 @@ fn duplicate_push_fails() {
         setup_name: _,
     } = build_graph_from_paper((), 999).unwrap();
     let a_id = peers.get("a").unwrap().id;
+    let new_event = SignedEvent::new((), event::Kind::Genesis, a_id, 0, |h| {
+        MockSigner::<i32>::new().sign(h)
+    })
+    .expect("Failed to create event");
+    let (unsigned, signature) = new_event.into_parts();
     assert!(matches!(
-        graph.push_event(Event::new((), event::Kind::Genesis, a_id, 0, |h| ().sign(h)).expect("Failed to create event")),
+        graph.push_event(unsigned, signature),
         Err(PushError::EventAlreadyExists(hash)) if &hash == graph.peer_genesis(&a_id).unwrap()
     ));
 }
@@ -103,11 +124,12 @@ fn double_genesis_fails() {
         names: _,
         setup_name: _,
     } = build_graph_from_paper(0, 999).unwrap();
+    let new_event =
+        SignedEvent::new_fakely_signed(1, event::Kind::Genesis, peers.get("a").unwrap().id, 0)
+            .expect("Failed to create event");
+    let (unsigned, signature) = new_event.into_parts();
     assert!(matches!(
-        graph.push_event(
-            Event::new_unsigned(1, event::Kind::Genesis, peers.get("a").unwrap().id, 0)
-                .expect("Failed to create event")
-        ),
+        graph.push_event(unsigned, signature),
         Err(PushError::GenesisAlreadyExists)
     ))
 }
@@ -120,15 +142,24 @@ fn missing_parent_fails() {
         names: _,
         setup_name: _,
     } = build_graph_from_paper((), 999).unwrap();
-    let fake_event = EventWrapper::new_unsigned((), event::Kind::Genesis, 1232423, 123).unwrap();
+    let fake_event =
+        EventWrapper::new_fakely_signed((), event::Kind::Genesis, 1232423, 123).unwrap();
     let legit_event_hash = graph.peer_latest_event(&0).unwrap().clone();
 
     let fake_parents_1 = Parents {
         self_parent: fake_event.inner().identifier().clone(),
         other_parent: legit_event_hash.clone(),
     };
+    let new_event = SignedEvent::new_fakely_signed(
+        (),
+        event::Kind::Regular(fake_parents_1),
+        peers.get("a").unwrap().id,
+        0,
+    )
+    .expect("Failed to create event");
+    let (unsigned, signature) = new_event.into_parts();
     assert!(matches!(
-        graph.push_event(Event::new_unsigned((), event::Kind::Regular(fake_parents_1), peers.get("a").unwrap().id, 0).expect("Failed to create event")),
+        graph.push_event(unsigned, signature),
         Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_event.inner().identifier()
     ));
 
@@ -136,8 +167,16 @@ fn missing_parent_fails() {
         self_parent: legit_event_hash.clone(),
         other_parent: fake_event.inner().identifier().clone(),
     };
+    let new_event = SignedEvent::new_fakely_signed(
+        (),
+        event::Kind::Regular(fake_parents_2),
+        peers.get("a").unwrap().id,
+        0,
+    )
+    .expect("Failed to create event");
+    let (unsigned, signature) = new_event.into_parts();
     assert!(matches!(
-        graph.push_event(Event::new_unsigned((), event::Kind::Regular(fake_parents_2), peers.get("a").unwrap().id, 0).expect("Failed to create event")),
+        graph.push_event(unsigned, signature),
         Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_event.inner().identifier()
     ));
 }
@@ -554,7 +593,7 @@ fn test_determine_round() {
 fn test_round_indices_consistent() {
     // Uses internal state, yes. Want to make sure it's consistent to avoid future problems.
     fn round_index_consistent<TPayload, TPeerId: Eq + std::hash::Hash>(
-        graph: &Graph<TPayload, TPeerId, (), IncrementalClock>,
+        graph: &Graph<TPayload, TPeerId, MockSigner<TPeerId>, IncrementalClock>,
         hash: &event::Hash,
     ) -> Result<usize, String> {
         let round_of_num = graph.round_of(hash);

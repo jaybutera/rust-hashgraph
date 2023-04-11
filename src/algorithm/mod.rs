@@ -1,7 +1,11 @@
+use std::marker::PhantomData;
+
 use blake2::{Blake2b512, Digest};
 use thiserror::Error;
 
 use crate::Timestamp;
+
+use self::event::WithSignatureCreationError;
 
 pub mod datastructure;
 pub mod event;
@@ -17,15 +21,43 @@ type RoundNum = usize;
 type Signature = event::Hash;
 
 pub trait Signer {
+    type SignerIdentity;
+
     fn sign(&self, message: &[u8]) -> Signature;
+    fn verify(
+        &self,
+        message: &[u8],
+        signature: &Signature,
+        identity: &Self::SignerIdentity,
+    ) -> bool;
 }
 
-impl Signer for () {
+pub struct MockSigner<I>(PhantomData<I>);
+
+impl<I> MockSigner<I> {
+    pub fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<I> Signer for MockSigner<I> {
     fn sign(&self, message: &[u8]) -> Signature {
         let mut hasher = Blake2b512::new();
         hasher.update(message);
         let hash_slice = &hasher.finalize()[..];
         Signature::from_array(hash_slice.try_into().unwrap())
+    }
+
+    type SignerIdentity = I;
+
+    fn verify(
+        &self,
+        message: &[u8],
+        signature: &Signature,
+        _identity: &Self::SignerIdentity,
+    ) -> bool {
+        let calc_hash = self.sign(message);
+        &calc_hash == signature
     }
 }
 
@@ -76,4 +108,6 @@ pub enum PushError<TPeerId> {
     IncorrectAuthor(TPeerId, TPeerId),
     #[error("Serialization failed")]
     SerializationFailure(#[from] bincode::Error),
+    #[error(transparent)]
+    InvalidSignature(#[from] WithSignatureCreationError),
 }

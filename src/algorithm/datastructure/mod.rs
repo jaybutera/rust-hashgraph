@@ -9,8 +9,8 @@ use std::fmt::Debug;
 use self::ordering::OrderedEvents;
 use self::peer_index::{PeerIndex, PeerIndexEntry};
 use self::slice::SliceIterator;
-use super::event::{self, Event, EventWrapper, Parents};
-use super::{Clock, PushError, RoundNum};
+use super::event::{self, EventWrapper, Parents, SignedEvent, UnsignedEvent};
+use super::{Clock, PushError, RoundNum, Signature};
 use crate::algorithm::Signer;
 use crate::Timestamp;
 
@@ -151,7 +151,7 @@ impl<TPayload, TPeerId, TSigner, TClock> Graph<TPayload, TPeerId, TSigner, TCloc
 where
     TPayload: Serialize + Eq + std::hash::Hash + Debug + Clone,
     TPeerId: Serialize + Eq + std::hash::Hash + Debug + Clone,
-    TSigner: Signer,
+    TSigner: Signer<SignerIdentity = TPeerId>,
     TClock: Clock,
 {
     pub fn new(
@@ -177,17 +177,17 @@ where
         };
 
         let genesis_timestamp = graph.clock.current_timestamp();
+        let (genesis_event, genesis_sig) = SignedEvent::new(
+            genesis_payload,
+            event::Kind::Genesis,
+            self_id,
+            genesis_timestamp,
+            |h| graph.signer.sign(h),
+        )
+        .expect("Invalid own genesis, can't start consensus")
+        .into_parts();
         graph
-            .push_event(
-                Event::new(
-                    genesis_payload,
-                    event::Kind::Genesis,
-                    self_id,
-                    genesis_timestamp,
-                    |h| graph.signer.sign(h),
-                )
-                .expect("Invalid own genesis, can't start consensus"),
-            )
+            .push_event(genesis_event, genesis_sig)
             .expect("Genesis events should be valid");
         graph
     }
@@ -202,7 +202,7 @@ where
             .peer_latest_event(&self.self_id)
             .expect("Peer must know itself")
             .clone();
-        let event = Event::new(
+        let event = SignedEvent::new(
             payload,
             event::Kind::Regular(Parents {
                 self_parent,
@@ -213,7 +213,8 @@ where
             |h| self.signer.sign(h),
         )?;
         let identifier = event.identifier().clone();
-        self.push_event(event)?;
+        let (event, signature) = event.into_parts();
+        self.push_event(event, signature)?;
         Ok(identifier)
     }
 
@@ -225,14 +226,18 @@ where
     #[instrument(level = "trace", skip(self))]
     pub fn push_event(
         &mut self,
-        event: Event<TPayload, TPeerId>,
+        event: UnsignedEvent<TPayload, TPeerId>,
+        signature: Signature,
     ) -> Result<(), PushError<TPeerId>> {
         // Verification first, no changing state
         debug!("Validating the event");
+        trace!("Verify signature");
+        let event = SignedEvent::with_signature(event, signature, |digest, signature, author| {
+            self.signer.verify(digest, signature, author)
+        })?;
+        trace!("Event hash: {}", event.identifier());
 
-        trace!("Creating an event");
         let new_event = EventWrapper::new(event);
-        trace!("Event hash: {}", new_event.inner().identifier());
 
         trace!("Testing if event is already known");
         if self.all_events.contains_key(new_event.inner().identifier()) {
@@ -699,6 +704,10 @@ where
     // for navigating the graph state externally
     pub fn event(&self, id: &event::Hash) -> Option<&event::EventWrapper<TPayload, TPeerId>> {
         self.all_events.get(id)
+    }
+
+    pub fn self_id(&self) -> &TPeerId {
+        &self.self_id
     }
 
     /// Iterator over ancestors of the event

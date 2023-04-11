@@ -1,5 +1,7 @@
 use std::{hash::Hash, iter::repeat};
 
+use crate::algorithm::MockSigner;
+
 use super::*;
 
 pub type MockPeerId = u64;
@@ -13,7 +15,7 @@ pub struct PeerEvents<TPeerId> {
 // Graph, Events by each peer, Test event names (for easier reading), Graph name
 pub struct TestSetup<TPayload, TPeerId> {
     /// Graph state
-    pub graph: Graph<TPayload, TPeerId, (), IncrementalClock>,
+    pub graph: Graph<TPayload, TPeerId, MockSigner<TPeerId>, IncrementalClock>,
     /// For getting hashes for events
     pub peers_events: HashMap<String, PeerEvents<TPeerId>>,
     /// For lookup of readable event name
@@ -23,7 +25,7 @@ pub struct TestSetup<TPayload, TPeerId> {
 
 /// See [`add_events_with_timestamps`]
 fn add_events<TPayload, TPeerId, TIter>(
-    graph: &mut Graph<TPayload, TPeerId, (), IncrementalClock>,
+    graph: &mut Graph<TPayload, TPeerId, MockSigner<TPeerId>, IncrementalClock>,
     events: &[(&'static str, &'static str, &'static str)],
     author_ids: HashMap<&'static str, TPeerId>,
     payload: &mut TIter,
@@ -66,7 +68,7 @@ where
 ///
 /// first match is chosen
 fn add_events_with_timestamps<T, TPeerId, TIter>(
-    graph: &mut Graph<T, TPeerId, (), IncrementalClock>,
+    graph: &mut Graph<T, TPeerId, MockSigner<TPeerId>, IncrementalClock>,
     events: &[(&'static str, &'static str, &'static str)],
     author_ids: HashMap<&'static str, TPeerId>,
     payload: &mut TIter,
@@ -173,7 +175,7 @@ where
             self_parent: self_parent_event_hash.clone(),
             other_parent: other_parent_event_hash.clone(),
         };
-        let new_event = Event::new_unsigned(
+        let new_event = SignedEvent::new_fakely_signed(
             payload.next().expect("Iterator finished"),
             event::Kind::Regular(parents),
             author_id.clone(),
@@ -183,8 +185,9 @@ where
         )
         .expect("Failed to create event");
         let new_event_hash = new_event.identifier().clone();
+        let (unsigned, signature) = new_event.into_parts();
         graph
-            .push_event(new_event)
+            .push_event(unsigned, signature)
             .map_err(|e| format!("Failer to push event {}: {:?}", event_name, e))?;
         peers_events
             .get_mut(&author)
@@ -201,7 +204,7 @@ where
 }
 
 fn add_geneses<TPayload, TPeerId>(
-    graph: &mut Graph<TPayload, TPeerId, (), IncrementalClock>,
+    graph: &mut Graph<TPayload, TPeerId, MockSigner<TPeerId>, IncrementalClock>,
     this_author: &str,
     author_ids: &HashMap<&'static str, TPeerId>,
     payload: TPayload,
@@ -220,10 +223,12 @@ where
                 .clone()
         } else {
             // Geneses should not have timestamp 0 (?), but why not do it for testing other components
-            let next_genesis = Event::new_unsigned(payload, event::Kind::Genesis, id.clone(), 0)
-                .expect("Failed to create event");
+            let next_genesis =
+                SignedEvent::new_fakely_signed(payload, event::Kind::Genesis, id.clone(), 0)
+                    .expect("Failed to create event");
             let gen_id = next_genesis.identifier().clone();
-            graph.push_event(next_genesis)?;
+            let (unsigned, signature) = next_genesis.into_parts();
+            graph.push_event(unsigned, signature)?;
             gen_id
         };
         names.insert(hash, name.to_owned());
@@ -243,7 +248,7 @@ where
         *author_ids.get("a").unwrap(),
         payload,
         coin_frequency,
-        (),
+        MockSigner::new(),
         IncrementalClock::new(),
     );
     let mut names =
@@ -297,7 +302,7 @@ where
         *author_ids.get("g1").unwrap(),
         payload,
         coin_frequency,
-        (),
+        MockSigner::new(),
         IncrementalClock::new(),
     );
     let mut names =
@@ -351,7 +356,7 @@ where
         *author_ids.get("a").unwrap(),
         payload,
         coin_frequency,
-        (),
+        MockSigner::new(),
         IncrementalClock::new(),
     );
     let mut names =
@@ -436,7 +441,7 @@ where
         *author_ids.get("a").unwrap(),
         payload.next().expect("Iterator finished"),
         coin_frequency,
-        (),
+        MockSigner::new(),
         IncrementalClock::new(),
     );
     let mut names = add_geneses(
@@ -486,7 +491,7 @@ where
         *author_ids.get("b").unwrap(),
         payload,
         coin_frequency,
-        (),
+        MockSigner::new(),
         IncrementalClock::new(),
     );
     let mut names =
