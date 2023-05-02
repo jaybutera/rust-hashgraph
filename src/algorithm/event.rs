@@ -109,7 +109,7 @@ impl<TPayload, TPeerId> EventWrapper<TPayload, TPeerId> {
     }
 }
 
-#[derive(Eq, PartialEq, Hash, Clone, Debug)]
+#[derive(Eq, PartialEq, Hash, Clone, Debug, Serialize, Deserialize)]
 pub struct SignedEvent<TPayload, TPeerId> {
     fields: UnsignedEvent<TPayload, TPeerId>,
     /// Hash of the fields of the event, signed by author's private key

@@ -1,5 +1,6 @@
 use std::collections::{HashSet, VecDeque};
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
@@ -7,6 +8,7 @@ use crate::{
     common::{Directed, Reversable},
 };
 
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct Jobs<TPayload, TPeerId> {
     inner: Vec<event::SignedEvent<TPayload, TPeerId>>,
 }
