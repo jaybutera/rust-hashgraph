@@ -5,14 +5,15 @@ use thiserror::Error;
 
 use crate::Timestamp;
 
-use super::Signature;
-
 // smth like H256 ??? (some hash type)
 #[derive(Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
 pub struct Hash {
     #[serde(with = "BigArray")]
     inner: [u8; 64],
 }
+
+#[derive(Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug)]
+pub struct Signature(pub Hash);
 
 impl std::fmt::Display for Hash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -113,7 +114,7 @@ impl<TPayload, TPeerId> EventWrapper<TPayload, TPeerId> {
 pub struct SignedEvent<TPayload, TPeerId> {
     unsigned: UnsignedEvent<TPayload, TPeerId>,
     /// Hash of the fields of the event, signed by author's private key
-    signature: Hash,
+    signature: Signature,
 }
 
 #[derive(Debug, Error)]
@@ -126,10 +127,10 @@ pub enum WithSignatureCreationError {
 
 impl<TPayload, TPeerId> SignedEvent<TPayload, TPeerId> {
     pub fn hash(&self) -> &Hash {
-        &self.signature
+        &self.unsigned.hash
     }
 
-    pub fn signature(&self) -> &Hash {
+    pub fn signature(&self) -> &Signature {
         &self.signature
     }
 
@@ -155,7 +156,7 @@ where
         sign: F,
     ) -> bincode::Result<Self>
     where
-        F: FnOnce(&[u8]) -> Hash,
+        F: FnOnce(&[u8]) -> Signature,
     {
         let fields = EventFields {
             user_payload: payload,
@@ -202,10 +203,12 @@ where
     where
         TPayload: Serialize,
     {
-        Self::new(payload, event_kind, author, timestamp, |h| Hash {
-            inner: h
-                .try_into()
-                .expect("Fixed hash function must return same result length"),
+        Self::new(payload, event_kind, author, timestamp, |h| {
+            Signature(Hash {
+                inner: h
+                    .try_into()
+                    .expect("Fixed hash function must return same result length"),
+            })
         })
     }
 }
@@ -366,8 +369,12 @@ impl Into<Vec<Hash>> for Kind {
 
 impl<TPayload, TPeerId> EventWrapper<TPayload, TPeerId> {
     // TODO: actually have signature
-    pub fn signature(&self) -> &Signature {
+    pub fn hash(&self) -> &Hash {
         self.inner.hash()
+    }
+
+    pub fn signature(&self) -> &Signature {
+        self.inner.signature()
     }
 
     pub fn parents(&self) -> &Kind {
@@ -469,8 +476,8 @@ mod tests {
         let events = create_events().unwrap();
         let mut identifiers = HashSet::with_capacity(events.len());
         for n in events {
-            assert!(!identifiers.contains(n.signature()));
-            identifiers.insert(n.signature().clone());
+            assert!(!identifiers.contains(n.hash()));
+            identifiers.insert(n.hash().clone());
         }
     }
 }

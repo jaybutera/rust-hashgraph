@@ -545,7 +545,7 @@ where
                         self.all_events
                             .get(e)
                             .expect("witnesses must be tracked")
-                            .signature()
+                            .hash()
                             .clone()
                     })
                     .collect();
@@ -978,7 +978,7 @@ where
                                 .all_events
                                 .get(y_hash)
                                 .expect("Inconsistent graph state") //TODO: turn to error
-                                .signature()
+                                .hash()
                                 .as_ref();
                             let middle_bit_index = y_sig.len() * 8 / 2;
                             let middle_byte_index = middle_bit_index / 8;
@@ -1083,7 +1083,7 @@ where
             .all_events
             .get(event_hash)
             .ok_or(UnknownEvent(event_hash.clone()))?
-            .signature();
+            .hash();
 
         // "x is an ancestor of every round r unique famous witness", where `r` is
         // `checked_round`. `r` is also the earliest such round.

@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::Timestamp;
 
-use self::event::WithSignatureCreationError;
+use self::event::{Hash, Signature, WithSignatureCreationError};
 
 pub mod datastructure;
 pub mod event;
@@ -16,9 +16,6 @@ pub mod event;
 // For 10 round/sec and u32 it's 27 years, so
 // TODO put a warning for such case or drop program.
 type RoundNum = usize;
-
-// TODO: change to actual signature
-type Signature = event::Hash;
 
 pub trait Signer {
     type SignerIdentity;
@@ -45,7 +42,7 @@ impl<I> Signer for MockSigner<I> {
         let mut hasher = Blake2b512::new();
         hasher.update(message);
         let hash_slice = &hasher.finalize()[..];
-        Signature::from_array(hash_slice.try_into().unwrap())
+        Signature(Hash::from_array(hash_slice.try_into().unwrap()))
     }
 
     type SignerIdentity = I;
