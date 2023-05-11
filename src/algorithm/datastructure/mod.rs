@@ -153,7 +153,7 @@ where
     TPayload: Serialize + Eq + std::hash::Hash + Debug + Clone,
     TGenesisPayload: Serialize + Eq + std::hash::Hash + Debug + Clone,
     TPeerId: Serialize + Eq + std::hash::Hash + Debug + Clone,
-    TSigner: Signer<SignerIdentity = TPeerId>,
+    TSigner: Signer<TGenesisPayload, SignerIdentity = TPeerId>,
     TClock: Clock,
 {
     pub fn new(
@@ -234,9 +234,28 @@ where
     ) -> Result<(), PushError<TPeerId>> {
         // Verification first, no changing state
         debug!("Validating the event");
+        let genesis_payload = match event.fields().kind() {
+            event::Kind::Genesis(payload) => payload,
+            event::Kind::Regular(_) => {
+                let peer_author = event.fields().author();
+                let genesis_hash = self
+                    .peer_genesis(peer_author)
+                    .ok_or_else(|| PushError::PeerNotFound(peer_author.clone()))?;
+                let genesis = self.all_events.get(genesis_hash).expect(&format!(
+                    "Genesis of a peer is not tracked (peer: {:?}, genesis: {})",
+                    peer_author, genesis_hash
+                ));
+                let event::Kind::Genesis(gen_payload) = genesis.kind() else {
+                    panic!("Already verified genesis {} doesn't have `Genesis` kind", genesis_hash)
+                };
+                gen_payload
+            }
+        };
+        let genesis_payload = genesis_payload.clone();
         trace!("Verify signature");
         let event = SignedEvent::with_signature(event, signature, |digest, signature, author| {
-            self.signer.verify(digest.as_ref(), signature, author)
+            self.signer
+                .verify(digest.as_ref(), signature, author, &genesis_payload)
         })?;
         trace!("Event hash: {}", event.hash());
 

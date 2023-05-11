@@ -1,4 +1,5 @@
 use blake2::{Blake2b512, Digest};
+use derive_getters::Getters;
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 use thiserror::Error;
@@ -214,13 +215,31 @@ where
     }
 }
 
-#[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
+#[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug, Getters)]
 pub struct UnsignedEvent<TPayload, TGenesisPayload, TPeerId> {
     fields: EventFields<TPayload, TGenesisPayload, TPeerId>,
     hash: Hash,
 }
 
-#[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
+impl<TPayload, TGenesisPayload, TPeerId> UnsignedEvent<TPayload, TGenesisPayload, TPeerId>
+where
+    TPayload: Serialize,
+    TGenesisPayload: Serialize,
+    TPeerId: Serialize,
+{
+    pub fn new(fields: EventFields<TPayload, TGenesisPayload, TPeerId>) -> bincode::Result<Self> {
+        let mut hasher = Blake2b512::new();
+        hasher.update(fields.digest()?);
+        let hash_slice = &hasher.finalize()[..];
+        let hash_arr: [u8; 64] = hash_slice.try_into().expect("event hashing failure");
+        Ok(Self {
+            fields,
+            hash: Hash::from_array(hash_arr),
+        })
+    }
+}
+
+#[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug, Getters)]
 pub struct EventFields<TPayload, TGenesisPayload, TPeerId> {
     user_payload: TPayload,
     kind: Kind<TGenesisPayload>,
@@ -246,24 +265,6 @@ where
         let timestamp_bytes = bincode::serialize(&self.timestamp)?;
         v.extend(timestamp_bytes);
         Ok(v)
-    }
-}
-
-impl<TPayload, TGenesisPayload, TPeerId> UnsignedEvent<TPayload, TGenesisPayload, TPeerId>
-where
-    TPayload: Serialize,
-    TGenesisPayload: Serialize,
-    TPeerId: Serialize,
-{
-    pub fn new(fields: EventFields<TPayload, TGenesisPayload, TPeerId>) -> bincode::Result<Self> {
-        let mut hasher = Blake2b512::new();
-        hasher.update(fields.digest()?);
-        let hash_slice = &hasher.finalize()[..];
-        let hash_arr: [u8; 64] = hash_slice.try_into().expect("event hashing failure");
-        Ok(Self {
-            fields,
-            hash: Hash::from_array(hash_arr),
-        })
     }
 }
 

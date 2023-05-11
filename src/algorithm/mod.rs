@@ -17,7 +17,7 @@ pub mod event;
 // TODO put a warning for such case or drop program.
 type RoundNum = usize;
 
-pub trait Signer {
+pub trait Signer<TGenesisPayload> {
     type SignerIdentity;
 
     fn sign(&self, message: &[u8]) -> Signature;
@@ -26,18 +26,19 @@ pub trait Signer {
         message: &[u8],
         signature: &Signature,
         identity: &Self::SignerIdentity,
+        genesis_payload: &TGenesisPayload,
     ) -> bool;
 }
 
-pub struct MockSigner<I>(PhantomData<I>);
+pub struct MockSigner<I, G>(PhantomData<(I, G)>);
 
-impl<I> MockSigner<I> {
+impl<I, G> MockSigner<I, G> {
     pub fn new() -> Self {
         Self(PhantomData)
     }
 }
 
-impl<I> Signer for MockSigner<I> {
+impl<I, G> Signer<G> for MockSigner<I, G> {
     fn sign(&self, message: &[u8]) -> Signature {
         let mut hasher = Blake2b512::new();
         hasher.update(message);
@@ -52,6 +53,7 @@ impl<I> Signer for MockSigner<I> {
         message: &[u8],
         signature: &Signature,
         _identity: &Self::SignerIdentity,
+        _genesis_payload: &G,
     ) -> bool {
         let calc_hash = self.sign(message);
         &calc_hash == signature

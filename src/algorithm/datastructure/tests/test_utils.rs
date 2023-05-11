@@ -257,7 +257,13 @@ pub(crate) fn test_cases<TPayload, TGenesisPayload, TPeerId, TArg, TResult, F, F
     name_lookup: FNameLookup,
 ) where
     F: Fn(
-        &mut Graph<TPayload, TGenesisPayload, TPeerId, MockSigner<TPeerId>, IncrementalClock>,
+        &mut Graph<
+            TPayload,
+            TGenesisPayload,
+            TPeerId,
+            MockSigner<TPeerId, TGenesisPayload>,
+            IncrementalClock,
+        >,
         &TArg,
     ) -> TResult,
     TResult: PartialEq + std::fmt::Debug,

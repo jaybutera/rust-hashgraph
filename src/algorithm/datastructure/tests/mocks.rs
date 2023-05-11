@@ -15,7 +15,13 @@ pub struct PeerEvents<TPeerId> {
 // Graph, Events by each peer, Test event names (for easier reading), Graph name
 pub struct TestSetup<TPayload, TGenesisPayload, TPeerId> {
     /// Graph state
-    pub graph: Graph<TPayload, TGenesisPayload, TPeerId, MockSigner<TPeerId>, IncrementalClock>,
+    pub graph: Graph<
+        TPayload,
+        TGenesisPayload,
+        TPeerId,
+        MockSigner<TPeerId, TGenesisPayload>,
+        IncrementalClock,
+    >,
     /// For getting hashes for events
     pub peers_events: HashMap<String, PeerEvents<TPeerId>>,
     /// For lookup of readable event name
@@ -25,7 +31,13 @@ pub struct TestSetup<TPayload, TGenesisPayload, TPeerId> {
 
 /// See [`add_events_with_timestamps`]
 fn add_events<TPayload, TGenesisPayload, TPeerId, TIter>(
-    graph: &mut Graph<TPayload, TGenesisPayload, TPeerId, MockSigner<TPeerId>, IncrementalClock>,
+    graph: &mut Graph<
+        TPayload,
+        TGenesisPayload,
+        TPeerId,
+        MockSigner<TPeerId, TGenesisPayload>,
+        IncrementalClock,
+    >,
     events: &[(&'static str, &'static str, &'static str)],
     author_ids: HashMap<&'static str, TPeerId>,
     payload: &mut TIter,
@@ -69,7 +81,7 @@ where
 ///
 /// first match is chosen
 fn add_events_with_timestamps<T, G, TPeerId, TIter>(
-    graph: &mut Graph<T, G, TPeerId, MockSigner<TPeerId>, IncrementalClock>,
+    graph: &mut Graph<T, G, TPeerId, MockSigner<TPeerId, G>, IncrementalClock>,
     events: &[(&'static str, &'static str, &'static str)],
     author_ids: HashMap<&'static str, TPeerId>,
     payload: &mut TIter,
@@ -206,7 +218,7 @@ where
 }
 
 fn add_geneses<TPayload, TPeerId>(
-    graph: &mut Graph<TPayload, (), TPeerId, MockSigner<TPeerId>, IncrementalClock>,
+    graph: &mut Graph<TPayload, (), TPeerId, MockSigner<TPeerId, ()>, IncrementalClock>,
     this_author: &str,
     author_ids: &HashMap<&'static str, TPeerId>,
     payload: TPayload,
