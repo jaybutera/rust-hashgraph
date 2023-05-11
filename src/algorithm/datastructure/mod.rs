@@ -253,9 +253,9 @@ where
         };
         let genesis_payload = genesis_payload.clone();
         trace!("Verify signature");
-        let event = SignedEvent::with_signature(event, signature, |digest, signature, author| {
+        let event = SignedEvent::with_signature(event, signature, |hash, signature, author| {
             self.signer
-                .verify(digest.as_ref(), signature, author, &genesis_payload)
+                .verify(hash, signature, author, &genesis_payload)
         })?;
         trace!("Event hash: {}", event.hash());
 

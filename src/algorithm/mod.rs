@@ -20,10 +20,10 @@ type RoundNum = usize;
 pub trait Signer<TGenesisPayload> {
     type SignerIdentity;
 
-    fn sign(&self, message: &[u8]) -> Signature;
+    fn sign(&self, event_hash: &Hash) -> Signature;
     fn verify(
         &self,
-        message: &[u8],
+        event_hash: &Hash,
         signature: &Signature,
         identity: &Self::SignerIdentity,
         genesis_payload: &TGenesisPayload,
@@ -39,9 +39,9 @@ impl<I, G> MockSigner<I, G> {
 }
 
 impl<I, G> Signer<G> for MockSigner<I, G> {
-    fn sign(&self, message: &[u8]) -> Signature {
+    fn sign(&self, message: &Hash) -> Signature {
         let mut hasher = Blake2b512::new();
-        hasher.update(message);
+        hasher.update(message.as_ref());
         let hash_slice = &hasher.finalize()[..];
         Signature(Hash::from_array(hash_slice.try_into().unwrap()))
     }
@@ -50,7 +50,7 @@ impl<I, G> Signer<G> for MockSigner<I, G> {
 
     fn verify(
         &self,
-        message: &[u8],
+        message: &Hash,
         signature: &Signature,
         _identity: &Self::SignerIdentity,
         _genesis_payload: &G,

@@ -159,7 +159,7 @@ where
         sign: F,
     ) -> bincode::Result<Self>
     where
-        F: FnOnce(&[u8]) -> Signature,
+        F: FnOnce(&Hash) -> Signature,
     {
         let fields = EventFields {
             user_payload: payload,
@@ -168,7 +168,7 @@ where
             timestamp,
         };
         let unsigned_event = UnsignedEvent::new(fields)?;
-        let signature = sign(unsigned_event.hash.as_ref());
+        let signature = sign(&unsigned_event.hash);
         Ok(SignedEvent {
             unsigned: unsigned_event,
             signature,
@@ -206,11 +206,7 @@ where
         TGenesisPayload: Serialize,
     {
         Self::new(payload, event_kind, author, timestamp, |h| {
-            Signature(Hash {
-                inner: h
-                    .try_into()
-                    .expect("Fixed hash function must return same result length"),
-            })
+            Signature(h.clone())
         })
     }
 }
