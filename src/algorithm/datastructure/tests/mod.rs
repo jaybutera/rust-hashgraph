@@ -147,7 +147,7 @@ fn missing_parent_fails() {
     let legit_event_hash = graph.peer_latest_event(&0).unwrap().clone();
 
     let fake_parents_1 = Parents {
-        self_parent: fake_event.inner().identifier().clone(),
+        self_parent: fake_event.inner().hash().clone(),
         other_parent: legit_event_hash.clone(),
     };
     let new_event = SignedEvent::new_fakely_signed(
@@ -160,12 +160,12 @@ fn missing_parent_fails() {
     let (unsigned, signature) = new_event.into_parts();
     assert!(matches!(
         graph.push_event(unsigned, signature),
-        Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_event.inner().identifier()
+        Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_event.inner().hash()
     ));
 
     let fake_parents_2 = Parents {
         self_parent: legit_event_hash.clone(),
-        other_parent: fake_event.inner().identifier().clone(),
+        other_parent: fake_event.inner().hash().clone(),
     };
     let new_event = SignedEvent::new_fakely_signed(
         (),
@@ -177,7 +177,7 @@ fn missing_parent_fails() {
     let (unsigned, signature) = new_event.into_parts();
     assert!(matches!(
         graph.push_event(unsigned, signature),
-        Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_event.inner().identifier()
+        Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_event.inner().hash()
     ));
 }
 
@@ -344,8 +344,7 @@ fn test_ancestor_iter() {
         ),
     ];
     for (iter, ancestors) in cases {
-        let ancestors_from_iter =
-            HashSet::<_>::from_iter(iter.map(|e| e.inner().identifier().clone()));
+        let ancestors_from_iter = HashSet::<_>::from_iter(iter.map(|e| e.inner().hash().clone()));
         assert_eq!(
             ancestors,
             ancestors_from_iter,

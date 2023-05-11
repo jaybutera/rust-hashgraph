@@ -184,7 +184,7 @@ where
                 .expect(&format!("No timestamp for event {}", event_name)),
         )
         .expect("Failed to create event");
-        let new_event_hash = new_event.identifier().clone();
+        let new_event_hash = new_event.hash().clone();
         let (unsigned, signature) = new_event.into_parts();
         graph
             .push_event(unsigned, signature)
@@ -226,7 +226,7 @@ where
             let next_genesis =
                 SignedEvent::new_fakely_signed(payload, event::Kind::Genesis, id.clone(), 0)
                     .expect("Failed to create event");
-            let gen_id = next_genesis.identifier().clone();
+            let gen_id = next_genesis.hash().clone();
             let (unsigned, signature) = next_genesis.into_parts();
             graph.push_event(unsigned, signature)?;
             gen_id

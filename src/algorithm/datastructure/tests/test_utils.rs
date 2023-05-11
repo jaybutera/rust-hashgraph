@@ -403,7 +403,7 @@ pub mod topsort {
             sync_for
                 .as_linear()
                 .into_iter()
-                .map(|e| e.identifier().clone())
+                .map(|e| e.hash().clone())
                 .collect(),
             HashSet::<_>::from_iter(
                 expected_events

@@ -212,7 +212,7 @@ where
             self.clock.current_timestamp(),
             |h| self.signer.sign(h),
         )?;
-        let identifier = event.identifier().clone();
+        let identifier = event.hash().clone();
         let (event, signature) = event.into_parts();
         self.push_event(event, signature)?;
         Ok(identifier)
@@ -233,16 +233,16 @@ where
         debug!("Validating the event");
         trace!("Verify signature");
         let event = SignedEvent::with_signature(event, signature, |digest, signature, author| {
-            self.signer.verify(digest, signature, author)
+            self.signer.verify(digest.as_ref(), signature, author)
         })?;
-        trace!("Event hash: {}", event.identifier());
+        trace!("Event hash: {}", event.hash());
 
         let new_event = EventWrapper::new(event);
 
         trace!("Testing if event is already known");
-        if self.all_events.contains_key(new_event.inner().identifier()) {
+        if self.all_events.contains_key(new_event.inner().hash()) {
             return Err(PushError::EventAlreadyExists(
-                new_event.inner().identifier().clone(),
+                new_event.inner().hash().clone(),
             ));
         }
 
@@ -254,7 +254,7 @@ where
                     return Err(PushError::GenesisAlreadyExists);
                 }
                 debug!("The event is valid, updating state to include it");
-                let new_peer_index = PeerIndexEntry::new(new_event.inner().identifier().clone());
+                let new_peer_index = PeerIndexEntry::new(new_event.inner().hash().clone());
                 self.peer_index
                     .insert(new_event.author().clone(), new_peer_index);
             }
@@ -302,7 +302,7 @@ where
                 self_parent_event
                     .children
                     .self_child
-                    .add_child(new_event.inner().identifier().clone());
+                    .add_child(new_event.inner().hash().clone());
                 // Borrow checker doesn't want to treat the parameter to add_event
                 // as immutable reference otherwise :(
                 let self_parent_event = self
@@ -321,7 +321,7 @@ where
                     },
                     self_parent_event,
                     parents.other_parent.clone(),
-                    new_event.inner().identifier().clone(),
+                    new_event.inner().hash().clone(),
                 ) {
                     warn!("Peer index insertion error: {}", e);
                 }
@@ -332,13 +332,13 @@ where
                 other_parent_event
                     .children
                     .other_children
-                    .push(new_event.inner().identifier().clone());
+                    .push(new_event.inner().hash().clone());
             }
         };
 
         // Index the event and save
         trace!("Tracking the event");
-        let hash = new_event.inner().identifier().clone();
+        let hash = new_event.inner().hash().clone();
         self.all_events.insert(hash.clone(), new_event);
 
         // Set round
@@ -636,8 +636,7 @@ where
         // with `round_received` less than desired.
         let iter = SliceIterator::new(
             &init_slice,
-            |event: &EventWrapper<TPayload, TPeerId>| match self
-                .ordering_data(event.inner().identifier())
+            |event: &EventWrapper<TPayload, TPeerId>| match self.ordering_data(event.inner().hash())
             {
                 Ok((round_received, _, _)) => round_received < target_round_received,
                 Err(OrderingDataError::Undecided) => false,
@@ -653,11 +652,11 @@ where
 
         trace!("Getting ordered events");
         for event in iter {
-            match self.ordering_data(event.inner().identifier()) {
+            match self.ordering_data(event.inner().hash()) {
                 Ok((round_received, consensus_timestamp, event_signature)) => {
                     if round_received == target_round_received {
                         trace!("Found event with target round received");
-                        result.push((event.inner().identifier().clone(), consensus_timestamp, event_signature))
+                        result.push((event.inner().hash().clone(), consensus_timestamp, event_signature))
                     } else {
                         trace!("Not expected round received, skipping");
                         continue;
@@ -782,7 +781,7 @@ where
                     round_witnesses
                         .iter()
                         .fold(HashSet::new(), |mut set, witness| {
-                            if self.strongly_see(event_hash, &witness.inner().identifier()) {
+                            if self.strongly_see(event_hash, &witness.inner().hash()) {
                                 let author = witness.author();
                                 set.insert(author.clone());
                             }
@@ -1123,7 +1122,7 @@ where
                         .next()
                         .expect("at least 1 self-ancestor must be present - the event itself");
                     for next_ufw_ancestor in self_ancestors {
-                        if !self.is_ancestor(next_ufw_ancestor.inner().identifier(), event_hash) {
+                        if !self.is_ancestor(next_ufw_ancestor.inner().hash(), event_hash) {
                             break;
                         }
                         first_descendant_event_candidate = next_ufw_ancestor
@@ -1156,7 +1155,7 @@ where
 
         self.ancestor_iter(target)
             .unwrap()
-            .any(|e| e.inner().identifier() == potential_ancestor)
+            .any(|e| e.inner().hash() == potential_ancestor)
     }
 
     /// True if target(y) is an ancestor of observer(x), but no fork of target is an
@@ -1174,7 +1173,7 @@ where
         let authors_seen = self
             .ancestor_iter(observer)
             .unwrap()
-            .filter(|e| self.see(&e.inner().identifier(), target))
+            .filter(|e| self.see(&e.inner().hash(), target))
             .fold(HashSet::new(), |mut set, event| {
                 let author = event.author();
                 set.insert(author.clone());

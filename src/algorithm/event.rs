@@ -111,7 +111,7 @@ impl<TPayload, TPeerId> EventWrapper<TPayload, TPeerId> {
 
 #[derive(Eq, PartialEq, Hash, Clone, Debug, Serialize, Deserialize)]
 pub struct SignedEvent<TPayload, TPeerId> {
-    fields: UnsignedEvent<TPayload, TPeerId>,
+    unsigned: UnsignedEvent<TPayload, TPeerId>,
     /// Hash of the fields of the event, signed by author's private key
     signature: Hash,
 }
@@ -125,7 +125,7 @@ pub enum WithSignatureCreationError {
 }
 
 impl<TPayload, TPeerId> SignedEvent<TPayload, TPeerId> {
-    pub fn identifier(&self) -> &Hash {
+    pub fn hash(&self) -> &Hash {
         &self.signature
     }
 
@@ -133,12 +133,12 @@ impl<TPayload, TPeerId> SignedEvent<TPayload, TPeerId> {
         &self.signature
     }
 
-    pub fn fields(&self) -> &UnsignedEvent<TPayload, TPeerId> {
-        &self.fields
+    pub fn unsigned(&self) -> &UnsignedEvent<TPayload, TPeerId> {
+        &self.unsigned
     }
 
     pub fn into_parts(self) -> (UnsignedEvent<TPayload, TPeerId>, Signature) {
-        (self.fields, self.signature)
+        (self.unsigned, self.signature)
     }
 }
 
@@ -157,15 +157,18 @@ where
     where
         F: FnOnce(&[u8]) -> Hash,
     {
-        let unsigned_event = UnsignedEvent {
+        let fields = EventFields {
             user_payload: payload,
-            parents: event_kind,
-            author,
-            timestamp,
+            metadata: Metadata {
+                parents: event_kind,
+                author,
+                timestamp,
+            },
         };
-        let signature = Self::calculate_signature(&unsigned_event, sign)?;
+        let unsigned_event = UnsignedEvent::new(fields)?;
+        let signature = sign(unsigned_event.hash.as_ref());
         Ok(SignedEvent {
-            fields: unsigned_event,
+            unsigned: unsigned_event,
             signature,
         })
     }
@@ -176,33 +179,17 @@ where
         verify_signature: F,
     ) -> Result<Self, WithSignatureCreationError>
     where
-        F: FnOnce(&Vec<u8>, &Signature, &TPeerId) -> bool,
+        F: FnOnce(&Hash, &Signature, &TPeerId) -> bool,
     {
-        let digest = unsigned_event.digest()?;
-        if verify_signature(&digest, &signature, &unsigned_event.author) {
+        let hash = unsigned_event.hash.clone();
+        if verify_signature(&hash, &signature, &unsigned_event.fields.metadata.author) {
             Ok(SignedEvent {
-                fields: unsigned_event,
+                unsigned: unsigned_event,
                 signature,
             })
         } else {
             Err(WithSignatureCreationError::InvalidSignature)
         }
-    }
-
-    fn calculate_signature<F>(
-        unsigned_event: &UnsignedEvent<TPayload, TPeerId>,
-        sign: F,
-    ) -> bincode::Result<Hash>
-    where
-        F: FnOnce(&[u8]) -> Hash,
-    {
-        let mut hasher = Blake2b512::new();
-        hasher.update(unsigned_event.digest()?);
-        let hash_slice = &hasher.finalize()[..];
-        let signature = sign(hash_slice);
-        // Should be compiler checkable but the developers of the library
-        // didn't use generic constants, which would allow to work with arrays right away
-        Ok(signature)
     }
 
     #[cfg(test)]
@@ -225,14 +212,25 @@ where
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
 pub struct UnsignedEvent<TPayload, TPeerId> {
+    fields: EventFields<TPayload, TPeerId>,
+    hash: Hash,
+}
+
+#[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
+pub struct EventFields<TPayload, TPeerId> {
     user_payload: TPayload,
+    metadata: Metadata<TPeerId>,
+}
+
+#[derive(Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Debug)]
+struct Metadata<TPeerId> {
     parents: Kind,
     author: TPeerId,
     /// Timestamp set by author
     timestamp: Timestamp,
 }
 
-impl<TPayload, TPeerId> UnsignedEvent<TPayload, TPeerId>
+impl<TPayload, TPeerId> EventFields<TPayload, TPeerId>
 where
     TPayload: Serialize,
     TPeerId: Serialize,
@@ -241,13 +239,30 @@ where
         let mut v = vec![];
         let payload_bytes = bincode::serialize(&self.user_payload)?;
         v.extend(payload_bytes);
-        let kind_bytes = bincode::serialize(&self.parents)?;
+        let kind_bytes = bincode::serialize(&self.metadata.parents)?;
         v.extend(kind_bytes);
-        let author_bytes = bincode::serialize(&self.author)?;
+        let author_bytes = bincode::serialize(&self.metadata.author)?;
         v.extend(author_bytes);
-        let timestamp_bytes = bincode::serialize(&self.timestamp)?;
+        let timestamp_bytes = bincode::serialize(&self.metadata.timestamp)?;
         v.extend(timestamp_bytes);
         Ok(v)
+    }
+}
+
+impl<TPayload, TPeerId> UnsignedEvent<TPayload, TPeerId>
+where
+    TPayload: Serialize,
+    TPeerId: Serialize,
+{
+    pub fn new(fields: EventFields<TPayload, TPeerId>) -> bincode::Result<Self> {
+        let mut hasher = Blake2b512::new();
+        hasher.update(fields.digest()?);
+        let hash_slice = &hasher.finalize()[..];
+        let hash_arr: [u8; 64] = hash_slice.try_into().expect("event hashing failure");
+        Ok(Self {
+            fields,
+            hash: Hash::from_array(hash_arr),
+        })
     }
 }
 
@@ -352,23 +367,23 @@ impl Into<Vec<Hash>> for Kind {
 impl<TPayload, TPeerId> EventWrapper<TPayload, TPeerId> {
     // TODO: actually have signature
     pub fn signature(&self) -> &Signature {
-        self.inner.identifier()
+        self.inner.hash()
     }
 
     pub fn parents(&self) -> &Kind {
-        &self.inner.fields.parents
+        &self.inner.unsigned.fields.metadata.parents
     }
 
     pub fn payload(&self) -> &TPayload {
-        &self.inner.fields.user_payload
+        &self.inner.unsigned.fields.user_payload
     }
 
     pub fn author(&self) -> &TPeerId {
-        &self.inner.fields.author
+        &self.inner.unsigned.fields.metadata.author
     }
 
     pub fn timestamp(&self) -> &u128 {
-        &self.inner.fields.timestamp
+        &self.inner.unsigned.fields.metadata.timestamp
     }
 }
 

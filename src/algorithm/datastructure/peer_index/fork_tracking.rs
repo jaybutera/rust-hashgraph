@@ -21,7 +21,7 @@ impl ForkIndex {
         fork_parent: &event::EventWrapper<TPayload, TPeerId>,
         new_fork_child: event::Hash,
     ) {
-        match self.forks.entry(fork_parent.inner().identifier().clone()) {
+        match self.forks.entry(fork_parent.inner().hash().clone()) {
             Entry::Occupied(mut fork) => {
                 let fork = fork.get_mut();
                 fork.insert(new_fork_child);

@@ -72,7 +72,7 @@ impl PeerIndexEntry {
         // `event` itself is unknown to `events_in_direct_sight` yet, so we start from its
         // parents. Otherwise it will error, as `events_in_direct_sight` can't find anything
         self.add_known_events(
-            vec![self_parent.inner().identifier().clone(), other_parent],
+            vec![self_parent.inner().hash().clone(), other_parent],
             events_in_direct_sight,
         )?;
         // so we add the event separately
@@ -85,7 +85,7 @@ impl PeerIndexEntry {
             .with_child_removed(&event);
         match parent_self_children {
             event::SelfChild::HonestParent(None) => {
-                self.latest_events.remove(self_parent.inner().identifier());
+                self.latest_events.remove(self_parent.inner().hash());
             }
             event::SelfChild::HonestParent(Some(_)) | event::SelfChild::ForkingParent(_) => {
                 self.fork_index.track_fork(self_parent, event.clone());
@@ -152,10 +152,10 @@ mod tests {
         let mut all_events: HashMap<event::Hash, event::EventWrapper<TPayload, TPeerId>> =
             HashMap::new();
         let genesis = events.next().expect("event list must be nonempty");
-        all_events.insert(genesis.inner().identifier().clone(), genesis.clone());
-        let mut peer_index = PeerIndexEntry::new(genesis.inner().identifier().clone());
+        all_events.insert(genesis.inner().hash().clone(), genesis.clone());
+        let mut peer_index = PeerIndexEntry::new(genesis.inner().hash().clone());
         for event in events {
-            all_events.insert(event.inner().identifier().clone(), event.clone());
+            all_events.insert(event.inner().hash().clone(), event.clone());
             let (self_parent, other_parent) = if let event::Kind::Regular(p) = event.parents() {
                 (p.self_parent.clone(), p.other_parent.clone())
             } else {
@@ -166,7 +166,7 @@ mod tests {
                 .unwrap()
                 .children
                 .self_child
-                .add_child(event.inner().identifier().clone());
+                .add_child(event.inner().hash().clone());
             peer_index
                 .add_event(
                     |_h| Some(vec![]),
@@ -174,7 +174,7 @@ mod tests {
                         .get(&self_parent)
                         .expect("unknown event listed as peer"),
                     other_parent,
-                    event.inner().identifier().clone(),
+                    event.inner().hash().clone(),
                 )
                 .unwrap();
         }
@@ -201,7 +201,7 @@ mod tests {
             start_time.as_secs().into(),
         )
         .unwrap();
-        let a_hash = event_a.inner().identifier().clone();
+        let a_hash = event_a.inner().hash().clone();
 
         let event_b = event::EventWrapper::new_fakely_signed(
             (),
@@ -214,7 +214,7 @@ mod tests {
             (start_time + Duration::from_secs(1)).as_secs().into(),
         )
         .unwrap();
-        let b_hash = event_b.inner().identifier().clone();
+        let b_hash = event_b.inner().hash().clone();
 
         let event_c = event::EventWrapper::new_fakely_signed(
             (),
@@ -269,7 +269,7 @@ mod tests {
         let (index_2, _all_events_2) = construct_peer_index(&events);
 
         let authored_events_expected =
-            HashMap::<_, _>::from_iter(events.iter().map(|e| (e.inner().identifier().clone(), ())));
+            HashMap::<_, _>::from_iter(events.iter().map(|e| (e.inner().hash().clone(), ())));
         assert_eq!(
             index_2.authored_events(),
             &authored_events_expected,
@@ -279,36 +279,30 @@ mod tests {
             assert!(latest.contains(event), "Event is not tracked as tip");
         }
         // f
-        assert_latest(&index_2.latest_events, events[5].inner().identifier());
+        assert_latest(&index_2.latest_events, events[5].inner().hash());
         // e
-        assert_latest(&index_2.latest_events, events[4].inner().identifier());
+        assert_latest(&index_2.latest_events, events[4].inner().hash());
         // c
-        assert_latest(&index_2.latest_events, events[2].inner().identifier());
+        assert_latest(&index_2.latest_events, events[2].inner().hash());
         // d
-        assert_latest(&index_2.latest_events, events[3].inner().identifier());
-        assert_eq!(
-            index_2.origin(),
-            events.first().unwrap().inner().identifier()
-        );
+        assert_latest(&index_2.latest_events, events[3].inner().hash());
+        assert_eq!(index_2.origin(), events.first().unwrap().inner().hash());
         let forks_expected = HashMap::<_, _>::from_iter([
             (
-                events[0].inner().identifier().clone(),
+                events[0].inner().hash().clone(),
                 HashSet::<_>::from_iter(
-                    [
-                        events[1].inner().identifier(),
-                        events[5].inner().identifier(),
-                    ]
-                    .into_iter()
-                    .cloned(),
+                    [events[1].inner().hash(), events[5].inner().hash()]
+                        .into_iter()
+                        .cloned(),
                 ),
             ),
             (
-                events[1].inner().identifier().clone(),
+                events[1].inner().hash().clone(),
                 HashSet::<_>::from_iter(
                     [
-                        events[2].inner().identifier(),
-                        events[3].inner().identifier(),
-                        events[4].inner().identifier(),
+                        events[2].inner().hash(),
+                        events[3].inner().hash(),
+                        events[4].inner().hash(),
                     ]
                     .into_iter()
                     .cloned(),
