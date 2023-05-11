@@ -17,7 +17,7 @@ mod test_utils;
 
 #[test]
 fn push_works() {
-    let mut graph = Graph::new(0, (), 999, MockSigner::new(), IncrementalClock::new());
+    let mut graph = Graph::new(0, (), (), 999, MockSigner::new(), IncrementalClock::new());
 
     // new event by the same author
     let new_event = SignedEvent::new(
@@ -35,7 +35,7 @@ fn push_works() {
     graph.push_event(unsigned, signature).unwrap();
 
     // new peer
-    let new_event = SignedEvent::new((), event::Kind::Genesis, 1, 2, |h| {
+    let new_event = SignedEvent::new((), event::Kind::Genesis(()), 1, 2, |h| {
         MockSigner::<i32>::new().sign(h)
     })
     .unwrap();
@@ -63,6 +63,7 @@ fn create_works() {
     let mut graph = Graph::new(
         0,
         (),
+        (),
         999,
         MockSigner::<i32>::new(),
         IncrementalClock::new(),
@@ -74,7 +75,7 @@ fn create_works() {
         .unwrap();
 
     // new peer
-    let new_event = SignedEvent::new((), event::Kind::Genesis, 1, 2, |h| {
+    let new_event = SignedEvent::new((), event::Kind::Genesis(()), 1, 2, |h| {
         MockSigner::<i32>::new().sign(h)
     })
     .unwrap();
@@ -105,7 +106,7 @@ fn duplicate_push_fails() {
         setup_name: _,
     } = build_graph_from_paper((), 999).unwrap();
     let a_id = peers.get("a").unwrap().id;
-    let new_event = SignedEvent::new((), event::Kind::Genesis, a_id, 0, |h| {
+    let new_event = SignedEvent::new((), event::Kind::Genesis(()), a_id, 0, |h| {
         MockSigner::<i32>::new().sign(h)
     })
     .expect("Failed to create event");
@@ -125,7 +126,7 @@ fn double_genesis_fails() {
         setup_name: _,
     } = build_graph_from_paper(0, 999).unwrap();
     let new_event =
-        SignedEvent::new_fakely_signed(1, event::Kind::Genesis, peers.get("a").unwrap().id, 0)
+        SignedEvent::new_fakely_signed(1, event::Kind::Genesis(()), peers.get("a").unwrap().id, 0)
             .expect("Failed to create event");
     let (unsigned, signature) = new_event.into_parts();
     assert!(matches!(
@@ -143,7 +144,7 @@ fn missing_parent_fails() {
         setup_name: _,
     } = build_graph_from_paper((), 999).unwrap();
     let fake_event =
-        EventWrapper::new_fakely_signed((), event::Kind::Genesis, 1232423, 123).unwrap();
+        EventWrapper::new_fakely_signed((), event::Kind::Genesis(()), 1232423, 123).unwrap();
     let legit_event_hash = graph.peer_latest_event(&0).unwrap().clone();
 
     let fake_parents_1 = Parents {
@@ -591,8 +592,8 @@ fn test_determine_round() {
 #[test]
 fn test_round_indices_consistent() {
     // Uses internal state, yes. Want to make sure it's consistent to avoid future problems.
-    fn round_index_consistent<TPayload, TPeerId: Eq + std::hash::Hash>(
-        graph: &Graph<TPayload, TPeerId, MockSigner<TPeerId>, IncrementalClock>,
+    fn round_index_consistent<TPayload, TGenesisPayload, TPeerId: Eq + std::hash::Hash>(
+        graph: &Graph<TPayload, TGenesisPayload, TPeerId, MockSigner<TPeerId>, IncrementalClock>,
         hash: &event::Hash,
     ) -> Result<usize, String> {
         let round_of_num = graph.round_of(hash);

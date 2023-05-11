@@ -194,8 +194,8 @@ macro_rules! run_tests {
 
 pub(crate) use run_tests;
 
-pub(crate) struct Test<TPayload, TPeerId, TResult, TArg> {
-    pub setup: TestSetup<TPayload, TPeerId>,
+pub(crate) struct Test<TPayload, TGenesisPayload, TPeerId, TResult, TArg> {
+    pub setup: TestSetup<TPayload, TGenesisPayload, TPeerId>,
     pub results_args: Vec<(TResult, Vec<TArg>)>,
 }
 
@@ -250,13 +250,16 @@ pub(crate) struct Test<TPayload, TPeerId, TResult, TArg> {
 ///     |event, names| names.get(event).unwrap().to_owned(),
 /// );
 /// ```
-pub(crate) fn test_cases<TPayload, TPeerId, TArg, TResult, F, FNameLookup>(
-    cases: Vec<Test<TPayload, TPeerId, TResult, TArg>>,
+pub(crate) fn test_cases<TPayload, TGenesisPayload, TPeerId, TArg, TResult, F, FNameLookup>(
+    cases: Vec<Test<TPayload, TGenesisPayload, TPeerId, TResult, TArg>>,
     tested_function_name: &str,
     tested_function: F,
     name_lookup: FNameLookup,
 ) where
-    F: Fn(&mut Graph<TPayload, TPeerId, MockSigner<TPeerId>, IncrementalClock>, &TArg) -> TResult,
+    F: Fn(
+        &mut Graph<TPayload, TGenesisPayload, TPeerId, MockSigner<TPeerId>, IncrementalClock>,
+        &TArg,
+    ) -> TResult,
     TResult: PartialEq + std::fmt::Debug,
     FNameLookup: Fn(&HashMap<event::Hash, String>, &TArg) -> String,
 {
@@ -381,13 +384,14 @@ pub mod topsort {
         }
     }
 
-    pub fn test_topsort<TPayload, TPeerId>(
-        setup: &TestSetup<TPayload, TPeerId>,
+    pub fn test_topsort<TPayload, TGenesisPayload, TPeerId>(
+        setup: &TestSetup<TPayload, TGenesisPayload, TPeerId>,
         peer_name: &str,
         expected_events: Vec<PeerEventsSince>,
     ) -> Result<(), String>
     where
         TPayload: Clone,
+        TGenesisPayload: Clone,
         TPeerId: Eq + std::hash::Hash + Clone,
     {
         let TestSetup {

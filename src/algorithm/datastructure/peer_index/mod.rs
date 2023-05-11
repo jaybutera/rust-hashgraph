@@ -49,10 +49,10 @@ impl PeerIndexEntry {
     /// `events_in_direct_sight` should return Some(_) when the queried hash is known
     /// and None if unknown (should not happen on consistent graph). It may not know
     /// about `event` yet though.
-    pub fn add_event<'a, TPayload, TPeerId, F>(
+    pub fn add_event<'a, TPayload, TGenesisPayload, TPeerId, F>(
         &mut self,
         events_in_direct_sight: F,
-        self_parent: &event::EventWrapper<TPayload, TPeerId>,
+        self_parent: &event::EventWrapper<TPayload, TGenesisPayload, TPeerId>,
         other_parent: event::Hash,
         event: event::Hash,
     ) -> Result<(), Error>
@@ -138,25 +138,28 @@ mod tests {
     use std::{collections::HashSet, time::Duration};
 
     // Returns the index and all_events tracker
-    fn construct_peer_index<TPayload, TPeerId>(
-        events: &[event::EventWrapper<TPayload, TPeerId>],
+    fn construct_peer_index<TPayload, TGenesisPayload, TPeerId>(
+        events: &[event::EventWrapper<TPayload, TGenesisPayload, TPeerId>],
     ) -> (
         PeerIndexEntry,
-        HashMap<event::Hash, event::EventWrapper<TPayload, TPeerId>>,
+        HashMap<event::Hash, event::EventWrapper<TPayload, TGenesisPayload, TPeerId>>,
     )
     where
         TPayload: Clone,
+        TGenesisPayload: Clone,
         TPeerId: Clone,
     {
         let mut events = events.into_iter();
-        let mut all_events: HashMap<event::Hash, event::EventWrapper<TPayload, TPeerId>> =
-            HashMap::new();
+        let mut all_events: HashMap<
+            event::Hash,
+            event::EventWrapper<TPayload, TGenesisPayload, TPeerId>,
+        > = HashMap::new();
         let genesis = events.next().expect("event list must be nonempty");
         all_events.insert(genesis.inner().hash().clone(), genesis.clone());
         let mut peer_index = PeerIndexEntry::new(genesis.inner().hash().clone());
         for event in events {
             all_events.insert(event.inner().hash().clone(), event.clone());
-            let (self_parent, other_parent) = if let event::Kind::Regular(p) = event.parents() {
+            let (self_parent, other_parent) = if let event::Kind::Regular(p) = event.kind() {
                 (p.self_parent.clone(), p.other_parent.clone())
             } else {
                 panic!("2 geneses, can't add to the index");
@@ -196,7 +199,7 @@ mod tests {
         // Since we work with actual events, we can't use our sample hashes.
         let event_a = event::EventWrapper::new_fakely_signed(
             (),
-            event::Kind::Genesis,
+            event::Kind::Genesis(()),
             peer,
             start_time.as_secs().into(),
         )

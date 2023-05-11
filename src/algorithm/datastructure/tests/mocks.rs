@@ -13,9 +13,9 @@ pub struct PeerEvents<TPeerId> {
 }
 
 // Graph, Events by each peer, Test event names (for easier reading), Graph name
-pub struct TestSetup<TPayload, TPeerId> {
+pub struct TestSetup<TPayload, TGenesisPayload, TPeerId> {
     /// Graph state
-    pub graph: Graph<TPayload, TPeerId, MockSigner<TPeerId>, IncrementalClock>,
+    pub graph: Graph<TPayload, TGenesisPayload, TPeerId, MockSigner<TPeerId>, IncrementalClock>,
     /// For getting hashes for events
     pub peers_events: HashMap<String, PeerEvents<TPeerId>>,
     /// For lookup of readable event name
@@ -24,8 +24,8 @@ pub struct TestSetup<TPayload, TPeerId> {
 }
 
 /// See [`add_events_with_timestamps`]
-fn add_events<TPayload, TPeerId, TIter>(
-    graph: &mut Graph<TPayload, TPeerId, MockSigner<TPeerId>, IncrementalClock>,
+fn add_events<TPayload, TGenesisPayload, TPeerId, TIter>(
+    graph: &mut Graph<TPayload, TGenesisPayload, TPeerId, MockSigner<TPeerId>, IncrementalClock>,
     events: &[(&'static str, &'static str, &'static str)],
     author_ids: HashMap<&'static str, TPeerId>,
     payload: &mut TIter,
@@ -38,6 +38,7 @@ fn add_events<TPayload, TPeerId, TIter>(
 >
 where
     TPayload: Serialize + Copy + Default + Eq + Hash + Debug,
+    TGenesisPayload: Serialize + Copy + Default + Eq + Hash + Debug,
     TPeerId: Serialize + Eq + std::hash::Hash + Debug + Clone,
     TIter: Iterator<Item = TPayload>,
 {
@@ -67,8 +68,8 @@ where
 /// * name of peer for **its genesis**
 ///
 /// first match is chosen
-fn add_events_with_timestamps<T, TPeerId, TIter>(
-    graph: &mut Graph<T, TPeerId, MockSigner<TPeerId>, IncrementalClock>,
+fn add_events_with_timestamps<T, G, TPeerId, TIter>(
+    graph: &mut Graph<T, G, TPeerId, MockSigner<TPeerId>, IncrementalClock>,
     events: &[(&'static str, &'static str, &'static str)],
     author_ids: HashMap<&'static str, TPeerId>,
     payload: &mut TIter,
@@ -82,6 +83,7 @@ fn add_events_with_timestamps<T, TPeerId, TIter>(
 >
 where
     T: Serialize + Copy + Default + Eq + Hash + Debug,
+    G: Serialize + Copy + Default + Eq + Hash + Debug,
     TPeerId: Serialize + Eq + std::hash::Hash + Debug + Clone,
     TIter: Iterator<Item = T>,
 {
@@ -204,7 +206,7 @@ where
 }
 
 fn add_geneses<TPayload, TPeerId>(
-    graph: &mut Graph<TPayload, TPeerId, MockSigner<TPeerId>, IncrementalClock>,
+    graph: &mut Graph<TPayload, (), TPeerId, MockSigner<TPeerId>, IncrementalClock>,
     this_author: &str,
     author_ids: &HashMap<&'static str, TPeerId>,
     payload: TPayload,
@@ -224,7 +226,7 @@ where
         } else {
             // Geneses should not have timestamp 0 (?), but why not do it for testing other components
             let next_genesis =
-                SignedEvent::new_fakely_signed(payload, event::Kind::Genesis, id.clone(), 0)
+                SignedEvent::new_fakely_signed(payload, event::Kind::Genesis(()), id.clone(), 0)
                     .expect("Failed to create event");
             let gen_id = next_genesis.hash().clone();
             let (unsigned, signature) = next_genesis.into_parts();
@@ -239,7 +241,7 @@ where
 pub fn build_graph_from_paper<T>(
     payload: T,
     coin_frequency: usize,
-) -> Result<TestSetup<T, MockPeerId>, String>
+) -> Result<TestSetup<T, (), MockPeerId>, String>
 where
     T: Serialize + Copy + Default + Eq + Hash + Debug,
 {
@@ -247,6 +249,7 @@ where
     let mut graph = Graph::new(
         *author_ids.get("a").unwrap(),
         payload,
+        (),
         coin_frequency,
         MockSigner::new(),
         IncrementalClock::new(),
@@ -282,7 +285,7 @@ where
 pub fn build_graph_some_chain<T>(
     payload: T,
     coin_frequency: usize,
-) -> Result<TestSetup<T, MockPeerId>, String>
+) -> Result<TestSetup<T, (), MockPeerId>, String>
 where
     T: Serialize + Copy + Default + Eq + Hash + Debug,
 {
@@ -301,6 +304,7 @@ where
     let mut graph = Graph::new(
         *author_ids.get("g1").unwrap(),
         payload,
+        (),
         coin_frequency,
         MockSigner::new(),
         IncrementalClock::new(),
@@ -331,7 +335,7 @@ where
 pub fn build_graph_detailed_example<T>(
     payload: T,
     coin_frequency: usize,
-) -> Result<TestSetup<T, MockPeerId>, String>
+) -> Result<TestSetup<T, (), MockPeerId>, String>
 where
     T: Serialize + Copy + Default + Eq + Hash + Debug,
 {
@@ -342,7 +346,7 @@ pub fn build_graph_detailed_example_with_timestamps<T, TIter>(
     payload: T,
     coin_frequency: usize,
     mut timestamp_generator: TIter,
-) -> Result<TestSetup<T, MockPeerId>, String>
+) -> Result<TestSetup<T, (), MockPeerId>, String>
 where
     T: Serialize + Copy + Default + Eq + Hash + Debug,
     TIter: Iterator<Item = Timestamp>,
@@ -355,6 +359,7 @@ where
     let mut graph = Graph::new(
         *author_ids.get("a").unwrap(),
         payload,
+        (),
         coin_frequency,
         MockSigner::new(),
         IncrementalClock::new(),
@@ -428,7 +433,7 @@ where
 pub fn build_graph_fork<T, TIter>(
     mut payload: TIter,
     coin_frequency: usize,
-) -> Result<TestSetup<T, MockPeerId>, String>
+) -> Result<TestSetup<T, (), MockPeerId>, String>
 where
     T: Serialize + Copy + Default + Eq + Hash + Debug,
     TIter: Iterator<Item = T>,
@@ -440,6 +445,7 @@ where
     let mut graph = Graph::new(
         *author_ids.get("a").unwrap(),
         payload.next().expect("Iterator finished"),
+        (),
         coin_frequency,
         MockSigner::new(),
         IncrementalClock::new(),
@@ -480,7 +486,7 @@ where
 pub fn build_graph_index_test<T>(
     payload: T,
     coin_frequency: usize,
-) -> Result<TestSetup<T, MockPeerId>, String>
+) -> Result<TestSetup<T, (), MockPeerId>, String>
 where
     T: Serialize + Copy + Default + Eq + Hash + Debug,
 {
@@ -490,6 +496,7 @@ where
     let mut graph = Graph::new(
         *author_ids.get("b").unwrap(),
         payload,
+        (),
         coin_frequency,
         MockSigner::new(),
         IncrementalClock::new(),

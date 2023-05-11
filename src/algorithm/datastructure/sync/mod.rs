@@ -9,8 +9,8 @@ use crate::{
 };
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-pub struct Jobs<TPayload, TPeerId> {
-    inner: Vec<event::SignedEvent<TPayload, TPeerId>>,
+pub struct Jobs<TPayload, TGenesisPayload, TPeerId> {
+    inner: Vec<event::SignedEvent<TPayload, TGenesisPayload, TPeerId>>,
 }
 
 #[derive(Error, Debug)]
@@ -21,12 +21,12 @@ pub enum Error {
     UnknownEvent(event::Hash),
 }
 
-impl<TPayload, TPeerId> Jobs<TPayload, TPeerId> {
-    pub fn as_linear(&self) -> &Vec<event::SignedEvent<TPayload, TPeerId>> {
+impl<TPayload, TGenesisPayload, TPeerId> Jobs<TPayload, TGenesisPayload, TPeerId> {
+    pub fn as_linear(&self) -> &Vec<event::SignedEvent<TPayload, TGenesisPayload, TPeerId>> {
         &self.inner
     }
 
-    pub fn into_linear(self) -> Vec<event::SignedEvent<TPayload, TPeerId>> {
+    pub fn into_linear(self) -> Vec<event::SignedEvent<TPayload, TGenesisPayload, TPeerId>> {
         self.inner
     }
 
@@ -41,7 +41,7 @@ impl<TPayload, TPeerId> Jobs<TPayload, TPeerId> {
     where
         G: Directed<NodeIdentifier = event::Hash, NodeIdentifiers = Vec<event::Hash>>,
         FKnows: Fn(&event::Hash) -> bool,
-        FEvent: Fn(&event::Hash) -> Option<event::SignedEvent<TPayload, TPeerId>>,
+        FEvent: Fn(&event::Hash) -> Option<event::SignedEvent<TPayload, TGenesisPayload, TPeerId>>,
     {
         // We need topologically sorted subgraph of known state, that is unknown
         // to the peer. The sorting must be from the oldest to the newest events.
@@ -112,7 +112,7 @@ impl<TPayload, TPeerId> Jobs<TPayload, TPeerId> {
 
         // Prepare the jobs
         sorted.reverse();
-        let jobs: Vec<event::SignedEvent<TPayload, TPeerId>> = sorted
+        let jobs: Vec<event::SignedEvent<TPayload, TGenesisPayload, TPeerId>> = sorted
             .into_iter()
             .map(|hash| get_event(&hash).ok_or_else(|| Error::UnknownEvent(hash)))
             .collect::<Result<_, _>>()?;

@@ -16,9 +16,9 @@ impl ForkIndex {
         }
     }
 
-    pub fn track_fork<TPayload, TPeerId>(
+    pub fn track_fork<TPayload, TGenesisPayload, TPeerId>(
         &mut self,
-        fork_parent: &event::EventWrapper<TPayload, TPeerId>,
+        fork_parent: &event::EventWrapper<TPayload, TGenesisPayload, TPeerId>,
         new_fork_child: event::Hash,
     ) {
         match self.forks.entry(fork_parent.inner().hash().clone()) {

@@ -15,15 +15,17 @@ use super::UnknownEvent;
 ///
 /// `all_events` used for lookup of events since parents are stored in hashes (in the
 /// events).
-pub struct SliceIterator<'a, TPayload, TPeerId, FStop> {
-    current_slice: HashSet<&'a EventWrapper<TPayload, TPeerId>>,
+pub struct SliceIterator<'a, TPayload, TGenesisPayload, TPeerId, FStop> {
+    current_slice: HashSet<&'a EventWrapper<TPayload, TGenesisPayload, TPeerId>>,
     stop_iterate_peer: FStop,
-    all_events: &'a HashMap<event::Hash, EventWrapper<TPayload, TPeerId>>,
+    all_events: &'a HashMap<event::Hash, EventWrapper<TPayload, TGenesisPayload, TPeerId>>,
 }
 
-impl<'a, TPayload, TPeerId, FStop> SliceIterator<'a, TPayload, TPeerId, FStop>
+impl<'a, TPayload, TGenesisPayload, TPeerId, FStop>
+    SliceIterator<'a, TPayload, TGenesisPayload, TPeerId, FStop>
 where
     TPayload: Eq + std::hash::Hash,
+    TGenesisPayload: Eq + std::hash::Hash,
     TPeerId: Eq + std::hash::Hash,
 {
     /// Create iterator over graph slice.
@@ -36,10 +38,11 @@ where
     pub fn new(
         starting_slice: &HashSet<&event::Hash>,
         stop_condition: FStop,
-        all_events: &'a HashMap<event::Hash, EventWrapper<TPayload, TPeerId>>,
+        all_events: &'a HashMap<event::Hash, EventWrapper<TPayload, TGenesisPayload, TPeerId>>,
     ) -> Result<Self, UnknownEvent>
     where
         TPayload: Eq + std::hash::Hash,
+        TGenesisPayload: Eq + std::hash::Hash,
     {
         let current_slice: Result<Vec<_>, _> = starting_slice
             .iter()
@@ -54,8 +57,11 @@ where
         })
     }
 
-    fn add_parents(&mut self, event: &EventWrapper<TPayload, TPeerId>) -> Result<(), UnknownEvent> {
-        if let event::Kind::Regular(parents) = event.parents() {
+    fn add_parents(
+        &mut self,
+        event: &EventWrapper<TPayload, TGenesisPayload, TPeerId>,
+    ) -> Result<(), UnknownEvent> {
+        if let event::Kind::Regular(parents) = event.kind() {
             let self_parent = self
                 .all_events
                 .get(&parents.self_parent)
@@ -76,13 +82,15 @@ where
     }
 }
 
-impl<'a, TPayload, TPeerId, FStop> Iterator for SliceIterator<'a, TPayload, TPeerId, FStop>
+impl<'a, TPayload, TGenesisPayload, TPeerId, FStop> Iterator
+    for SliceIterator<'a, TPayload, TGenesisPayload, TPeerId, FStop>
 where
-    FStop: Fn(&EventWrapper<TPayload, TPeerId>) -> bool,
+    FStop: Fn(&EventWrapper<TPayload, TGenesisPayload, TPeerId>) -> bool,
     TPayload: Eq + std::hash::Hash,
+    TGenesisPayload: Eq + std::hash::Hash,
     TPeerId: Eq + std::hash::Hash,
 {
-    type Item = &'a EventWrapper<TPayload, TPeerId>;
+    type Item = &'a EventWrapper<TPayload, TGenesisPayload, TPeerId>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let next_event = self.current_slice.iter().next().cloned()?;
