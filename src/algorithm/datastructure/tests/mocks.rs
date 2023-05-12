@@ -30,7 +30,7 @@ pub struct TestSetup<TPayload, TGenesisPayload, TPeerId> {
 }
 
 /// See [`add_events_with_timestamps`]
-fn add_events<TPayload, TGenesisPayload, TPeerId, TIter>(
+fn add_events<TPayload, TGenesisPayload, TPeerId, TIter, TSigner>(
     graph: &mut Graph<
         TPayload,
         TGenesisPayload,
@@ -41,6 +41,7 @@ fn add_events<TPayload, TGenesisPayload, TPeerId, TIter>(
     events: &[(&'static str, &'static str, &'static str)],
     author_ids: HashMap<&'static str, TPeerId>,
     payload: &mut TIter,
+    universal_signer: TSigner,
 ) -> Result<
     (
         HashMap<String, PeerEvents<TPeerId>>,
@@ -53,9 +54,17 @@ where
     TGenesisPayload: Serialize + Copy + Default + Eq + Hash + Debug,
     TPeerId: Serialize + Eq + std::hash::Hash + Debug + Clone,
     TIter: Iterator<Item = TPayload>,
+    TSigner: Signer<(), SignerIdentity = TPeerId>,
 {
     let timestamps = events.iter().map(|&(name, _, _)| (name, 0)).collect();
-    add_events_with_timestamps(graph, events, author_ids, payload, timestamps)
+    add_events_with_timestamps(
+        graph,
+        events,
+        author_ids,
+        payload,
+        timestamps,
+        universal_signer,
+    )
 }
 
 /// ## Description
@@ -80,12 +89,13 @@ where
 /// * name of peer for **its genesis**
 ///
 /// first match is chosen
-fn add_events_with_timestamps<T, G, TPeerId, TIter>(
+fn add_events_with_timestamps<T, G, TPeerId, TIter, TSigner>(
     graph: &mut Graph<T, G, TPeerId, MockSigner<TPeerId, G>, IncrementalClock>,
     events: &[(&'static str, &'static str, &'static str)],
     author_ids: HashMap<&'static str, TPeerId>,
     payload: &mut TIter,
     timestamps: HashMap<&'static str, Timestamp>,
+    universal_signer: TSigner,
 ) -> Result<
     (
         HashMap<String, PeerEvents<TPeerId>>,
@@ -98,6 +108,7 @@ where
     G: Serialize + Copy + Default + Eq + Hash + Debug,
     TPeerId: Serialize + Eq + std::hash::Hash + Debug + Clone,
     TIter: Iterator<Item = T>,
+    TSigner: Signer<(), SignerIdentity = TPeerId>,
 {
     let mut inserted_events = HashMap::with_capacity(events.len());
     for (peer_name, peer_id) in &author_ids {
@@ -189,13 +200,14 @@ where
             self_parent: self_parent_event_hash.clone(),
             other_parent: other_parent_event_hash.clone(),
         };
-        let new_event = SignedEvent::new_fakely_signed(
+        let new_event = SignedEvent::new(
             payload.next().expect("Iterator finished"),
             event::Kind::Regular(parents),
             author_id.clone(),
             *timestamps
                 .get(event_name)
                 .expect(&format!("No timestamp for event {}", event_name)),
+            |h| universal_signer.sign(h),
         )
         .expect("Failed to create event");
         let new_event_hash = new_event.hash().clone();
@@ -217,15 +229,17 @@ where
     Ok((peers_events, names))
 }
 
-fn add_geneses<TPayload, TPeerId>(
-    graph: &mut Graph<TPayload, (), TPeerId, MockSigner<TPeerId, ()>, IncrementalClock>,
+fn add_geneses<TPayload, TPeerId, TSigner>(
+    graph: &mut Graph<TPayload, (), TPeerId, TSigner, IncrementalClock>,
     this_author: &str,
     author_ids: &HashMap<&'static str, TPeerId>,
     payload: TPayload,
+    universal_signer: TSigner,
 ) -> Result<HashMap<event::Hash, String>, PushError<TPeerId>>
 where
     TPayload: Serialize + Copy + Eq + Hash + Debug,
     TPeerId: Serialize + Eq + std::hash::Hash + Debug + Clone,
+    TSigner: Signer<(), SignerIdentity = TPeerId>,
 {
     let mut names = HashMap::with_capacity(author_ids.len());
 
@@ -238,8 +252,10 @@ where
         } else {
             // Geneses should not have timestamp 0 (?), but why not do it for testing other components
             let next_genesis =
-                SignedEvent::new_fakely_signed(payload, event::Kind::Genesis(()), id.clone(), 0)
-                    .expect("Failed to create event");
+                SignedEvent::new(payload, event::Kind::Genesis(()), id.clone(), 0, |h| {
+                    universal_signer.sign(h)
+                })
+                .expect("Failed to create event");
             let gen_id = next_genesis.hash().clone();
             let (unsigned, signature) = next_genesis.into_parts();
             graph.push_event(unsigned, signature)?;
@@ -266,8 +282,8 @@ where
         MockSigner::new(),
         IncrementalClock::new(),
     );
-    let mut names =
-        add_geneses(&mut graph, "a", &author_ids, payload).map_err(|e| format!("{}", e))?;
+    let mut names = add_geneses(&mut graph, "a", &author_ids, payload, MockSigner::new())
+        .map_err(|e| format!("{}", e))?;
     let events = [
         //  (name, peer, other_parent)
         ("c2", "c", "d"),
@@ -283,8 +299,13 @@ where
         ("c6", "c", "a3"),
     ];
     // let timestamps = events.iter().zip(0..).map(|(a, b)| (a.0, b)).collect();
-    let (peers_events, new_names) =
-        add_events(&mut graph, &events, author_ids, &mut repeat(payload))?;
+    let (peers_events, new_names) = add_events(
+        &mut graph,
+        &events,
+        author_ids,
+        &mut repeat(payload),
+        MockSigner::new(),
+    )?;
     names.extend(new_names);
     Ok(TestSetup {
         graph,
@@ -321,8 +342,8 @@ where
         MockSigner::new(),
         IncrementalClock::new(),
     );
-    let mut names =
-        add_geneses(&mut graph, "g1", &author_ids, payload).map_err(|e| format!("{}", e))?;
+    let mut names = add_geneses(&mut graph, "g1", &author_ids, payload, MockSigner::new())
+        .map_err(|e| format!("{}", e))?;
     let events = [
         //  (name, peer, other_parent)
         ("e1", "g1", "g2"),
@@ -333,8 +354,13 @@ where
         ("e6", "g3", "e5"),
         ("e7", "g2", "e6"),
     ];
-    let (peers_events, new_names) =
-        add_events(&mut graph, &events, author_ids, &mut repeat(payload))?;
+    let (peers_events, new_names) = add_events(
+        &mut graph,
+        &events,
+        author_ids,
+        &mut repeat(payload),
+        MockSigner::new(),
+    )?;
     names.extend(new_names);
     Ok(TestSetup {
         graph,
@@ -376,8 +402,8 @@ where
         MockSigner::new(),
         IncrementalClock::new(),
     );
-    let mut names =
-        add_geneses(&mut graph, "a", &author_ids, payload).map_err(|e| format!("{}", e))?;
+    let mut names = add_geneses(&mut graph, "a", &author_ids, payload, MockSigner::new())
+        .map_err(|e| format!("{}", e))?;
     // resources/graph_example.png for reference
     let events = [
         //  (name,  peer, other_parent)
@@ -432,6 +458,7 @@ where
         author_ids,
         &mut repeat(payload),
         timestamps,
+        MockSigner::new(),
     )?;
     names.extend(new_names);
     Ok(TestSetup {
@@ -467,6 +494,7 @@ where
         "a",
         &author_ids,
         payload.next().expect("Iterator finished"),
+        MockSigner::new(),
     )
     .map_err(|e| format!("{}", e))?;
     let events = [
@@ -485,7 +513,13 @@ where
         ("m4", "m", "a3"),
         ("a4", "a", "m4"),
     ];
-    let (peers_events, new_names) = add_events(&mut graph, &events, author_ids, &mut payload)?;
+    let (peers_events, new_names) = add_events(
+        &mut graph,
+        &events,
+        author_ids,
+        &mut payload,
+        MockSigner::new(),
+    )?;
     names.extend(new_names);
     Ok(TestSetup {
         graph,
@@ -513,8 +547,8 @@ where
         MockSigner::new(),
         IncrementalClock::new(),
     );
-    let mut names =
-        add_geneses(&mut graph, "b", &author_ids, payload).map_err(|e| format!("{}", e))?;
+    let mut names = add_geneses(&mut graph, "b", &author_ids, payload, MockSigner::new())
+        .map_err(|e| format!("{}", e))?;
     // resources/graph_example.png for reference
     let events = [
         //  (name,  peer, other_parent)
@@ -531,8 +565,13 @@ where
         ("a1", "a", "b"),
         ("a2", "a", "b1"),
     ];
-    let (peers_events, new_names) =
-        add_events(&mut graph, &events, author_ids, &mut repeat(payload))?;
+    let (peers_events, new_names) = add_events(
+        &mut graph,
+        &events,
+        author_ids,
+        &mut repeat(payload),
+        MockSigner::new(),
+    )?;
     names.extend(new_names);
     Ok(TestSetup {
         graph,

@@ -6,7 +6,7 @@ use mocks::{
 };
 use test_utils::{run_tests, test_cases, Test};
 
-use crate::algorithm::{IncrementalClock, MockSigner};
+use crate::algorithm::{datastructure::tests::mocks::MockPeerId, IncrementalClock, MockSigner};
 
 use super::*;
 
@@ -125,9 +125,14 @@ fn double_genesis_fails() {
         names: _,
         setup_name: _,
     } = build_graph_from_paper(0, 999).unwrap();
-    let new_event =
-        SignedEvent::new_fakely_signed(1, event::Kind::Genesis(()), peers.get("a").unwrap().id, 0)
-            .expect("Failed to create event");
+    let new_event = SignedEvent::new(
+        1,
+        event::Kind::Genesis(()),
+        peers.get("a").unwrap().id,
+        0,
+        |h| MockSigner::<MockPeerId, ()>::new().sign(h),
+    )
+    .expect("Failed to create event");
     let (unsigned, signature) = new_event.into_parts();
     assert!(matches!(
         graph.push_event(unsigned, signature),
@@ -143,42 +148,47 @@ fn missing_parent_fails() {
         names: _,
         setup_name: _,
     } = build_graph_from_paper((), 999).unwrap();
-    let fake_event =
-        EventWrapper::new_fakely_signed((), event::Kind::Genesis(()), 1232423, 123).unwrap();
+    let signer = MockSigner::<MockPeerId, ()>::new();
+    let fake_event = SignedEvent::new((), event::Kind::Genesis(()), 1232423, 123, |h| {
+        signer.sign(h)
+    })
+    .unwrap();
     let legit_event_hash = graph.peer_latest_event(&0).unwrap().clone();
 
     let fake_parents_1 = Parents {
-        self_parent: fake_event.inner().hash().clone(),
+        self_parent: fake_event.hash().clone(),
         other_parent: legit_event_hash.clone(),
     };
-    let new_event = SignedEvent::new_fakely_signed(
+    let new_event = SignedEvent::new(
         (),
         event::Kind::Regular(fake_parents_1),
         peers.get("a").unwrap().id,
         0,
+        |h| signer.sign(h),
     )
     .expect("Failed to create event");
     let (unsigned, signature) = new_event.into_parts();
     assert!(matches!(
         graph.push_event(unsigned, signature),
-        Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_event.inner().hash()
+        Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_event.hash()
     ));
 
     let fake_parents_2 = Parents {
         self_parent: legit_event_hash.clone(),
-        other_parent: fake_event.inner().hash().clone(),
+        other_parent: fake_event.hash().clone(),
     };
-    let new_event = SignedEvent::new_fakely_signed(
+    let new_event = SignedEvent::new(
         (),
         event::Kind::Regular(fake_parents_2),
         peers.get("a").unwrap().id,
         0,
+        |h| signer.sign(h),
     )
     .expect("Failed to create event");
     let (unsigned, signature) = new_event.into_parts();
     assert!(matches!(
         graph.push_event(unsigned, signature),
-        Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_event.inner().hash()
+        Err(PushError::NoParent(fake_hash)) if &fake_hash == fake_event.hash()
     ));
 }
 

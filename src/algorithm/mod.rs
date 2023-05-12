@@ -110,3 +110,29 @@ pub enum PushError<TPeerId> {
     #[error(transparent)]
     InvalidSignature(#[from] WithSignatureCreationError),
 }
+
+#[cfg(test)]
+mod tests {
+    use blake2::Blake2b512;
+    use blake2::Digest;
+
+    use super::event::Hash;
+    use super::MockSigner;
+    use super::Signer;
+
+    #[test]
+    fn mock_signer_works() {
+        let some_data = [0, 1, 2, 3];
+        let hash = {
+            let mut hasher = Blake2b512::new();
+            hasher.update(some_data);
+            let hash_slice = &hasher.finalize()[..];
+            let hash_arr: [u8; 64] = hash_slice.try_into().expect("event hashing failure");
+            Hash::from_array(hash_arr)
+        };
+
+        let signer = MockSigner::<(), ()>::new();
+        let signature = signer.sign(&hash);
+        assert!(signer.verify(&hash, &signature, &(), &()));
+    }
+}
