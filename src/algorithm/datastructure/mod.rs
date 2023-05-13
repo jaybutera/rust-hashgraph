@@ -669,7 +669,7 @@ where
                 .ordering_data(event.inner().hash())
             {
                 Ok((round_received, _, _)) => round_received < target_round_received,
-                Err(OrderingDataError::Undecided) => false,
+                Err(OrderingDataError::Undecided) => true,
                 Err(OrderingDataError::UnknownEvent(UnknownEvent(e))) => {
                     panic!("events referenced in events must be tracked {e} is unknown.")
                 }
