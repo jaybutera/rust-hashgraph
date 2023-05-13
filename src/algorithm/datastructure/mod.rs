@@ -556,7 +556,7 @@ where
     /// Otherwise we cannot guarantee that some event unknown to ufws will not appear (which
     /// would mean that we might skipped it already).
     ///
-    /// In other words, an event is finalized  when ufws of some round all see it. It implies
+    /// In other words, an event is finalized when ufws of some round all see it. It implies
     /// (at least it seems so) that we can univocally find its place in order of all events.
     fn add_new_ordered_events(&mut self, decided_round: usize) -> Result<(), OrderedEventsError> {
         trace!("Handling events sorted by round {}", decided_round);
@@ -600,7 +600,10 @@ where
     }
 
     // TODO: check if works properly with forks
-    /// Get events to be ordered by `round` (in no particular order yet).
+    /// Get events to be ordered by `target_round_received` (in no particular order yet).
+    ///
+    /// `target_round_received` is expected to be decided. For reference, round is decided
+    /// if all known witnesses had their fame decided, for both round r and all earlier rounds (from the paper)
     #[instrument(level = "trace", skip(self))]
     fn ordered_events(
         &mut self,
@@ -693,7 +696,7 @@ where
                     panic!("iterator must iterate on existing events. {e} is unknown.")
                 }
                 Err(OrderingDataError::Undecided) =>
-                    trace!("Event does not have ordering data yet, assuming its round_received is higher than needed"),
+                    trace!("Event does not have ordering data yet, its round_received must be higher than needed; skipping"),
             }
         }
         if !init_slice.is_empty() && result.is_empty() {
@@ -851,22 +854,20 @@ where
             .round_index
             .get(r)
             .ok_or(RoundUfwListError::UnknownRound)?;
-        if round_index
-            .iter()
-            .map(|e| self.is_unique_famous_witness(e))
-            .any(|ufw_res| matches!(ufw_res, Ok(WitnessUniqueFamousness::Undecided)))
-        {
-            return Err(RoundUfwListError::RoundUndecided);
+        let mut ufws = HashSet::new();
+        for round_event in round_index {
+            let is_ufw = self.is_unique_famous_witness(round_event);
+            match is_ufw {
+                Ok(WitnessUniqueFamousness::Undecided) => {
+                    return Err(RoundUfwListError::RoundUndecided)
+                }
+                Ok(WitnessUniqueFamousness::FamousUnique) => {
+                    ufws.insert(round_event);
+                }
+                Ok(_) | Err(_) => (),
+            }
         }
-        Ok(round_index
-            .iter()
-            .filter(|e| {
-                matches!(
-                    self.is_unique_famous_witness(e),
-                    Ok(WitnessUniqueFamousness::FamousUnique)
-                )
-            })
-            .collect())
+        Ok(ufws)
     }
 }
 
