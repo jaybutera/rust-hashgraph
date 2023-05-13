@@ -13,9 +13,6 @@ pub struct Hash {
     inner: [u8; 64],
 }
 
-#[derive(Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug)]
-pub struct Signature(pub Hash);
-
 impl std::fmt::Display for Hash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:X?}", self.inner)
@@ -67,6 +64,25 @@ impl Hash {
     }
 }
 
+#[derive(Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Debug)]
+pub struct Signature(pub Hash);
+
+impl std::ops::BitXor for &Signature {
+    type Output = Signature;
+
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        Signature(&self.0 ^ &rhs.0)
+    }
+}
+
+impl std::ops::BitXor<&Signature> for Signature {
+    type Output = Signature;
+
+    fn bitxor(mut self, rhs: &Self) -> Self::Output {
+        Signature(self.0 ^ &rhs.0)
+    }
+}
+
 /// Event with unsigned metadata for navigation.
 #[derive(Eq, PartialEq, Hash, Clone, Debug)]
 pub struct EventWrapper<TPayload, TGenesisPayload, TPeerId> {
@@ -109,6 +125,33 @@ impl<TPayload, TGenesisPayload, TPeerId> EventWrapper<TPayload, TGenesisPayload,
         let unsigned_event =
             SignedEvent::new_fakely_signed(payload, event_kind, author, timestamp)?;
         Ok(Self::new(unsigned_event))
+    }
+}
+
+impl<TPayload, TGenesisPayload, TPeerId> EventWrapper<TPayload, TGenesisPayload, TPeerId> {
+    // TODO: actually have signature
+    pub fn hash(&self) -> &Hash {
+        self.inner.hash()
+    }
+
+    pub fn signature(&self) -> &Signature {
+        self.inner.signature()
+    }
+
+    pub fn kind(&self) -> &Kind<TGenesisPayload> {
+        &self.inner.unsigned.fields.kind
+    }
+
+    pub fn payload(&self) -> &TPayload {
+        &self.inner.unsigned.fields.user_payload
+    }
+
+    pub fn author(&self) -> &TPeerId {
+        &self.inner.unsigned.fields.author
+    }
+
+    pub fn timestamp(&self) -> &u128 {
+        &self.inner.unsigned.fields.timestamp
     }
 }
 
@@ -359,33 +402,6 @@ impl<G> Into<Vec<Hash>> for Kind<G> {
                 other_parent,
             }) => vec![self_parent, other_parent],
         }
-    }
-}
-
-impl<TPayload, TGenesisPayload, TPeerId> EventWrapper<TPayload, TGenesisPayload, TPeerId> {
-    // TODO: actually have signature
-    pub fn hash(&self) -> &Hash {
-        self.inner.hash()
-    }
-
-    pub fn signature(&self) -> &Signature {
-        self.inner.signature()
-    }
-
-    pub fn kind(&self) -> &Kind<TGenesisPayload> {
-        &self.inner.unsigned.fields.kind
-    }
-
-    pub fn payload(&self) -> &TPayload {
-        &self.inner.unsigned.fields.user_payload
-    }
-
-    pub fn author(&self) -> &TPeerId {
-        &self.inner.unsigned.fields.author
-    }
-
-    pub fn timestamp(&self) -> &u128 {
-        &self.inner.unsigned.fields.timestamp
     }
 }
 

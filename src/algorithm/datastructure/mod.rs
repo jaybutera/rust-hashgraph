@@ -127,7 +127,7 @@ pub struct Graph<TPayload, TGenesisPayload, TPeerId, TSigner, TClock> {
     witnesses: HashMap<event::Hash, WitnessFamousness>,
     /// Cache, shouldn't be relied upon (however seems as reliable as `round_index`)
     round_of: HashMap<event::Hash, RoundNum>,
-    ordering_data_cache: HashMap<event::Hash, (usize, Timestamp, event::Hash)>,
+    ordering_data_cache: HashMap<event::Hash, (usize, Timestamp, event::Signature)>,
     /// The latest round known to have its fame decided. All previous rounds
     /// must be decided as well.
     ///
@@ -571,7 +571,7 @@ where
                         self.all_events
                             .get(e)
                             .expect("witnesses must be tracked")
-                            .hash()
+                            .signature()
                             .clone()
                     })
                     .collect();
@@ -605,7 +605,7 @@ where
     fn ordered_events(
         &mut self,
         target_round_received: usize,
-    ) -> Result<Vec<(event::Hash, Timestamp, event::Hash)>, OrderedEventsError> {
+    ) -> Result<Vec<(event::Hash, Timestamp, event::Signature)>, OrderedEventsError> {
         // We want to find all events with `round_received` == `target_round_received`.
         // To do it we start from witnesses of round `target_round_received`, since
         // no later rounds can have their `round_received` <= than our value of interest.
@@ -1101,7 +1101,7 @@ where
     fn ordering_data(
         &self,
         event_hash: &event::Hash,
-    ) -> Result<(usize, Timestamp, event::Hash), OrderingDataError> {
+    ) -> Result<(usize, Timestamp, event::Signature), OrderingDataError> {
         // is result cached?
         trace!("Checking cache if ordering data is already present there");
         if let Some(cached) = self.ordering_data_cache.get(event_hash) {
@@ -1115,7 +1115,7 @@ where
             .all_events
             .get(event_hash)
             .ok_or(UnknownEvent(event_hash.clone()))?
-            .hash();
+            .signature();
 
         // "x is an ancestor of every round r unique famous witness", where `r` is
         // `checked_round`. `r` is also the earliest such round.

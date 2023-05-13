@@ -41,8 +41,8 @@ impl OrderedEvents {
     pub fn add_received_round(
         &mut self,
         round: usize,
-        events: impl Iterator<Item = (event::Hash, Timestamp, event::Hash)>, // TODO: use newtypes where applicable
-        unique_famous_witness_sigs: Vec<event::Hash>,
+        events: impl Iterator<Item = (event::Hash, Timestamp, event::Signature)>, // TODO: use newtypes where applicable
+        unique_famous_witness_sigs: Vec<event::Signature>,
     ) -> Result<(), RoundAddError> {
         self.verify_round_number(round)?;
 
@@ -98,9 +98,11 @@ impl OrderedEvents {
             .ok_or(RoundAddError::IncorrectRoundNumber)
     }
 
-    fn combine_sigs_xor(sigs: impl Iterator<Item = event::Hash>) -> event::Hash {
-        sigs.into_iter()
-            .fold(event::Hash::from_array([0u8; 64]), |acc, next| acc ^ &next)
+    fn combine_sigs_xor(sigs: impl Iterator<Item = event::Signature>) -> event::Signature {
+        sigs.into_iter().fold(
+            event::Signature(event::Hash::from_array([0u8; 64])),
+            |acc, next| acc ^ &next,
+        )
     }
 }
 

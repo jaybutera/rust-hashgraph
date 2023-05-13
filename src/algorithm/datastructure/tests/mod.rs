@@ -1182,6 +1182,7 @@ fn test_ordering_decided() {
 
 #[test]
 fn test_ordering_data_correct() {
+    let signer = MockSigner::<u64, ()>::new();
     run_tests!(
         tested_function_name => "ordering_data correct values",
         tested_function => |g, event| g.ordering_data(*event),
@@ -1191,49 +1192,49 @@ fn test_ordering_data_correct() {
             (
                 setup => build_graph_detailed_example(0, 999).unwrap(),
                 test_case => (
-                    expect: Ok((1, 0, peers.get("a").unwrap().events[0].clone())),
+                    expect: Ok((1, 0, signer.sign(&peers.get("a").unwrap().events[0].clone()))),
                     arguments: vec![&peers.get("a").unwrap().events[0]],
                 ),
                 test_case => (
-                    expect: Ok((1, 0, peers.get("a").unwrap().events[1].clone())),
+                    expect: Ok((1, 0, signer.sign(&peers.get("a").unwrap().events[1].clone()))),
                     arguments: vec![&peers.get("a").unwrap().events[1]],
                 ),
                 test_case => (
-                    expect: Ok((1, 0, peers.get("b").unwrap().events[0].clone())),
+                    expect: Ok((1, 0, signer.sign(&peers.get("b").unwrap().events[0].clone()))),
                     arguments: vec![&peers.get("b").unwrap().events[0]],
                 ),
                 test_case => (
-                    expect: Ok((1, 0, peers.get("b").unwrap().events[1].clone())),
+                    expect: Ok((1, 0, signer.sign(&peers.get("b").unwrap().events[1].clone()))),
                     arguments: vec![&peers.get("b").unwrap().events[1]],
                 ),
                 test_case => (
-                    expect: Ok((1, 0, peers.get("b").unwrap().events[2].clone())),
+                    expect: Ok((1, 0, signer.sign(&peers.get("b").unwrap().events[2].clone()))),
                     arguments: vec![&peers.get("b").unwrap().events[2]],
                 ),
                 test_case => (
-                    expect: Ok((1, 0, peers.get("c").unwrap().events[0].clone())),
+                    expect: Ok((1, 0, signer.sign(&peers.get("c").unwrap().events[0].clone()))),
                     arguments: vec![&peers.get("c").unwrap().events[0]],
                 ),
                 test_case => (
-                    expect: Ok((1, 0, peers.get("d").unwrap().events[0].clone())),
+                    expect: Ok((1, 0, signer.sign(&peers.get("d").unwrap().events[0].clone()))),
                     arguments: vec![&peers.get("d").unwrap().events[0]],
                 ),
                 test_case => (
-                    expect: Ok((1, 0, peers.get("d").unwrap().events[1].clone())),
+                    expect: Ok((1, 0, signer.sign(&peers.get("d").unwrap().events[1].clone()))),
                     arguments: vec![&peers.get("d").unwrap().events[1]],
                 ),
                 test_case => (
-                    expect: Ok((1, 0, peers.get("d").unwrap().events[2].clone())),
+                    expect: Ok((1, 0, signer.sign(&peers.get("d").unwrap().events[2].clone()))),
                     arguments: vec![&peers.get("d").unwrap().events[2]],
                 ),
                 test_case => (
-                    expect: Ok((1, 0, peers.get("d").unwrap().events[3].clone())),
+                    expect: Ok((1, 0, signer.sign(&peers.get("d").unwrap().events[3].clone()))),
                     arguments: vec![&peers.get("d").unwrap().events[3]],
                 ),
                 // For some reason they do not consider this event in "detailed examples"
                 // however it seems to fit the needed properties.
                 test_case => (
-                    expect: Ok((1, 0, peers.get("d").unwrap().events[4].clone())),
+                    expect: Ok((1, 0, signer.sign(&peers.get("d").unwrap().events[4].clone()))),
                     arguments: vec![&peers.get("d").unwrap().events[4]],
                 ),
                 test_case => (
@@ -1253,49 +1254,49 @@ fn test_ordering_data_correct() {
                     0, 999, successors(Some(1), |x| Some(x+1))
                 ).unwrap(),
                 test_case => (
-                    expect: Ok((1, 9, peers.get("a").unwrap().events[0].clone())),
+                    expect: Ok((1, 9, signer.sign(&peers.get("a").unwrap().events[0].clone()))),
                     arguments: vec![&peers.get("a").unwrap().events[0]],
                 ),
                 test_case => (
-                    expect: Ok((1, 9, peers.get("a").unwrap().events[1].clone())),
+                    expect: Ok((1, 9, signer.sign(&peers.get("a").unwrap().events[1].clone()))),
                     arguments: vec![&peers.get("a").unwrap().events[1]],
                 ),
                 test_case => (
-                    expect: Ok((1, 1, peers.get("b").unwrap().events[0].clone())),
+                    expect: Ok((1, 1, signer.sign(&peers.get("b").unwrap().events[0].clone()))),
                     arguments: vec![&peers.get("b").unwrap().events[0]],
                 ),
                 test_case => (
-                    expect: Ok((1, 3, peers.get("b").unwrap().events[1].clone())),
+                    expect: Ok((1, 3, signer.sign(&peers.get("b").unwrap().events[1].clone()))),
                     arguments: vec![&peers.get("b").unwrap().events[1]],
                 ),
                 test_case => (
-                    expect: Ok((1, 6, peers.get("b").unwrap().events[2].clone())),
+                    expect: Ok((1, 6, signer.sign(&peers.get("b").unwrap().events[2].clone()))),
                     arguments: vec![&peers.get("b").unwrap().events[2]],
                 ),
                 test_case => (
-                    expect: Ok((1, 6, peers.get("c").unwrap().events[0].clone())),
+                    expect: Ok((1, 6, signer.sign(&peers.get("c").unwrap().events[0].clone()))),
                     arguments: vec![&peers.get("c").unwrap().events[0]],
                 ),
                 test_case => (
-                    expect: Ok((1, 2, peers.get("d").unwrap().events[0].clone())),
+                    expect: Ok((1, 2, signer.sign(&peers.get("d").unwrap().events[0].clone()))),
                     arguments: vec![&peers.get("d").unwrap().events[0]],
                 ),
                 test_case => (
-                    expect: Ok((1, 2, peers.get("d").unwrap().events[1].clone())),
+                    expect: Ok((1, 2, signer.sign(&peers.get("d").unwrap().events[1].clone()))),
                     arguments: vec![&peers.get("d").unwrap().events[1]],
                 ),
                 test_case => (
-                    expect: Ok((1, 8, peers.get("d").unwrap().events[2].clone())),
+                    expect: Ok((1, 8, signer.sign(&peers.get("d").unwrap().events[2].clone()))),
                     arguments: vec![&peers.get("d").unwrap().events[2]],
                 ),
                 test_case => (
-                    expect: Ok((1, 8, peers.get("d").unwrap().events[3].clone())),
+                    expect: Ok((1, 8, signer.sign(&peers.get("d").unwrap().events[3].clone()))),
                     arguments: vec![&peers.get("d").unwrap().events[3]],
                 ),
                 // For some reason they do not consider this event in "detailed examples"
                 // however it seems to fit the needed properties.
                 test_case => (
-                    expect: Ok((1, 10, peers.get("d").unwrap().events[4].clone())),
+                    expect: Ok((1, 10, signer.sign(&peers.get("d").unwrap().events[4].clone()))),
                     arguments: vec![&peers.get("d").unwrap().events[4]],
                 ),
                 test_case => (
@@ -1312,6 +1313,36 @@ fn test_ordering_data_correct() {
             ),
         ]
     );
+}
+
+#[test]
+fn event_order_correct() {
+    let setup =
+        build_graph_detailed_example_with_timestamps(0, 999, successors(Some(1), |x| Some(x + 1)))
+            .unwrap();
+    let TestSetup {
+        graph,
+        peers_events: peers,
+        names,
+        setup_name,
+    } = setup;
+
+    // exp
+    let expected_finalized = vec![
+        ((1, 9), &peers.get("a").unwrap().events[0]),
+        ((1, 9), &peers.get("a").unwrap().events[1]),
+        ((1, 1), &peers.get("b").unwrap().events[0]),
+        ((1, 3), &peers.get("b").unwrap().events[1]),
+        ((1, 6), &peers.get("b").unwrap().events[2]),
+        ((1, 6), &peers.get("c").unwrap().events[0]),
+        ((1, 2), &peers.get("d").unwrap().events[0]),
+        ((1, 2), &peers.get("d").unwrap().events[1]),
+        ((1, 8), &peers.get("d").unwrap().events[2]),
+        ((1, 8), &peers.get("d").unwrap().events[3]),
+        // For some reason they do not consider this event in "detailed examples"
+        // however it seems to fit the needed properties.
+        ((1, 10), &peers.get("d").unwrap().events[4]),
+    ];
 }
 
 #[test]
