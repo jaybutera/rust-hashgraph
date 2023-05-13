@@ -1,5 +1,6 @@
 use std::{iter::successors, ops::Deref};
 
+use itertools::Itertools;
 use mocks::{
     build_graph_detailed_example, build_graph_detailed_example_with_timestamps, build_graph_fork,
     build_graph_from_paper, build_graph_index_test, build_graph_some_chain, TestSetup,
@@ -1321,28 +1322,39 @@ fn event_order_correct() {
         build_graph_detailed_example_with_timestamps(0, 999, successors(Some(1), |x| Some(x + 1)))
             .unwrap();
     let TestSetup {
-        graph,
+        mut graph,
         peers_events: peers,
         names,
         setup_name,
     } = setup;
+    let signer = MockSigner::<u64, ()>::new();
 
     // exp
     let expected_finalized = vec![
-        ((1, 9), &peers.get("a").unwrap().events[0]),
-        ((1, 9), &peers.get("a").unwrap().events[1]),
-        ((1, 1), &peers.get("b").unwrap().events[0]),
-        ((1, 3), &peers.get("b").unwrap().events[1]),
-        ((1, 6), &peers.get("b").unwrap().events[2]),
-        ((1, 6), &peers.get("c").unwrap().events[0]),
-        ((1, 2), &peers.get("d").unwrap().events[0]),
-        ((1, 2), &peers.get("d").unwrap().events[1]),
-        ((1, 8), &peers.get("d").unwrap().events[2]),
-        ((1, 8), &peers.get("d").unwrap().events[3]),
-        // For some reason they do not consider this event in "detailed examples"
-        // however it seems to fit the needed properties.
-        ((1, 10), &peers.get("d").unwrap().events[4]),
+        (&peers.get("b").unwrap().events[0], (1, 1)),
+        (&peers.get("d").unwrap().events[0], (1, 2)),
+        (&peers.get("d").unwrap().events[1], (1, 2)),
+        (&peers.get("b").unwrap().events[1], (1, 3)),
+        (&peers.get("b").unwrap().events[2], (1, 6)),
+        (&peers.get("c").unwrap().events[0], (1, 6)),
+        (&peers.get("d").unwrap().events[2], (1, 8)),
+        (&peers.get("d").unwrap().events[3], (1, 8)),
+        (&peers.get("a").unwrap().events[0], (1, 9)),
+        (&peers.get("a").unwrap().events[1], (1, 9)),
+        (&peers.get("d").unwrap().events[4], (1, 10)),
     ];
+    let expected_finalized = expected_finalized
+        .into_iter()
+        .map(|(hash, (_, _))| hash)
+        .cloned()
+        .collect_vec();
+
+    let mut finalized = vec![];
+    while let Some(event) = graph.next_event() {
+        finalized.push(event.hash().clone());
+    }
+
+    assert_eq!(finalized, expected_finalized);
 }
 
 #[test]

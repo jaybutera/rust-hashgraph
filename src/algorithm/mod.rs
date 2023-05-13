@@ -100,7 +100,7 @@ pub enum PushError<TPeerId> {
     NoParent(event::Hash),
     #[error("Pushed event is already present in the graph. Hash: `{0}`. Can be triggered if hashes collide for actually different events (although extremely unlikely for 512 bit hash)")]
     EventAlreadyExists(event::Hash),
-    #[error("Given peer in not known ")]
+    #[error("The author of a regular event is unkown")]
     PeerNotFound(TPeerId),
     /// `(expected, provided)`
     #[error("Provided author is different from author of self parent (expected {0}, provided {1}")]

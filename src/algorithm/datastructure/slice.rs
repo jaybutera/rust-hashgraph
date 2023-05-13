@@ -32,7 +32,7 @@ where
     ///
     /// - `starting_slice`: initial slice, the iterator will go only to their same-peer
     /// ancestors (created by the same peer).
-    /// - `stop_condition`: predicate. When returns `false`, the event its parents
+    /// - `stop_condition`: predicate. When returns `false`, the event and its parents
     /// are not considered.
     /// - `all_events`: event lookup.
     pub fn new(
@@ -93,14 +93,16 @@ where
     type Item = &'a EventWrapper<TPayload, TGenesisPayload, TPeerId>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let next_event = self.current_slice.iter().next().cloned()?;
-        self.current_slice.remove(next_event);
-        if (self.stop_iterate_peer)(next_event) {
-            None
-        } else {
-            self.add_parents(next_event)
-                .expect("parents must be tracked");
-            Some(next_event)
+        while let Some(next_event) = self.current_slice.iter().next().cloned() {
+            self.current_slice.remove(next_event);
+            if (self.stop_iterate_peer)(next_event) {
+                continue;
+            } else {
+                self.add_parents(next_event)
+                    .expect("parents must be tracked");
+                return Some(next_event);
+            }
         }
+        return None;
     }
 }
