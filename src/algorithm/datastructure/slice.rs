@@ -11,18 +11,18 @@ use super::UnknownEvent;
 /// guarantee homogeneous (?) pass, i.e. might first go through only one peer and then
 /// visit events of others.
 ///
-/// Finishes when parents of all sliced events do not satisfy `stop_condition`.
+/// Finishes when parents of all sliced events do not satisfy `continue_iterate_peer`.
 ///
 /// `all_events` used for lookup of events since parents are stored in hashes (in the
 /// events).
-pub struct SliceIterator<'a, TPayload, TGenesisPayload, TPeerId, FStop> {
+pub struct SliceIterator<'a, TPayload, TGenesisPayload, TPeerId, FContinue> {
     current_slice: HashSet<&'a EventWrapper<TPayload, TGenesisPayload, TPeerId>>,
-    stop_iterate_peer: FStop,
+    continue_iterate_peer: FContinue,
     all_events: &'a HashMap<event::Hash, EventWrapper<TPayload, TGenesisPayload, TPeerId>>,
 }
 
-impl<'a, TPayload, TGenesisPayload, TPeerId, FStop>
-    SliceIterator<'a, TPayload, TGenesisPayload, TPeerId, FStop>
+impl<'a, TPayload, TGenesisPayload, TPeerId, FContinue>
+    SliceIterator<'a, TPayload, TGenesisPayload, TPeerId, FContinue>
 where
     TPayload: Eq + std::hash::Hash,
     TGenesisPayload: Eq + std::hash::Hash,
@@ -32,12 +32,12 @@ where
     ///
     /// - `starting_slice`: initial slice, the iterator will go only to their same-peer
     /// ancestors (created by the same peer).
-    /// - `stop_condition`: predicate. When returns `false`, the event and its parents
+    /// - `continue_condition`: predicate. When returns `false`, the event and its parents
     /// are not considered.
     /// - `all_events`: event lookup.
     pub fn new(
         starting_slice: &HashSet<&event::Hash>,
-        stop_condition: FStop,
+        continue_condition: FContinue,
         all_events: &'a HashMap<event::Hash, EventWrapper<TPayload, TGenesisPayload, TPeerId>>,
     ) -> Result<Self, UnknownEvent>
     where
@@ -52,7 +52,7 @@ where
         let current_slice = HashSet::<_>::from_iter(current_slice);
         Ok(Self {
             current_slice,
-            stop_iterate_peer: stop_condition,
+            continue_iterate_peer: continue_condition,
             all_events,
         })
     }
@@ -82,10 +82,10 @@ where
     }
 }
 
-impl<'a, TPayload, TGenesisPayload, TPeerId, FStop> Iterator
-    for SliceIterator<'a, TPayload, TGenesisPayload, TPeerId, FStop>
+impl<'a, TPayload, TGenesisPayload, TPeerId, FContinuw> Iterator
+    for SliceIterator<'a, TPayload, TGenesisPayload, TPeerId, FContinuw>
 where
-    FStop: Fn(&EventWrapper<TPayload, TGenesisPayload, TPeerId>) -> bool,
+    FContinuw: Fn(&EventWrapper<TPayload, TGenesisPayload, TPeerId>) -> bool,
     TPayload: Eq + std::hash::Hash,
     TGenesisPayload: Eq + std::hash::Hash,
     TPeerId: Eq + std::hash::Hash,
@@ -95,7 +95,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(next_event) = self.current_slice.iter().next().cloned() {
             self.current_slice.remove(next_event);
-            if (self.stop_iterate_peer)(next_event) {
+            if !(self.continue_iterate_peer)(next_event) {
                 continue;
             } else {
                 self.add_parents(next_event)

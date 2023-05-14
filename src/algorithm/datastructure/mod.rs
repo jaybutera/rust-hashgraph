@@ -104,8 +104,6 @@ pub enum OrderingDataError {
 pub enum OrderedEventsError {
     #[error("Provided round number is not present in the graph")]
     UnknownRound,
-    #[error("Given round is undecided")]
-    UndecidedRound,
 }
 
 #[derive(Error, Debug)]
@@ -468,15 +466,15 @@ where
             };
             // We insert only events ordered by rounds with their fame decided.
             let new_rounds_that_order =
-                self.ordering.next_round_to_order()..last_known_decided_round;
+                self.ordering.next_round_to_order()..last_known_decided_round + 1;
             debug!(
-                "Sorting events ordered by rounds in range [{}, {})",
-                new_rounds_that_order.start, new_rounds_that_order.end
+                "Sorting events ordered by rounds in range [{}, {}]",
+                new_rounds_that_order.start,
+                new_rounds_that_order.end - 1
             );
             for decided_round in new_rounds_that_order {
                 match self.add_new_ordered_events(decided_round) {
                     Ok(()) => (),
-                    Err(OrderedEventsError::UndecidedRound) => break,
                     Err(OrderedEventsError::UnknownRound) => {
                         panic!("Round marked as `last_known_decided_round` must be known")
                     }
@@ -586,10 +584,6 @@ where
             }
             Err(e) => {
                 match e {
-                    OrderedEventsError::UndecidedRound => warn!(
-                        "No events ordered by round {} were found for some reason",
-                        decided_round
-                    ),
                     OrderedEventsError::UnknownRound => {
                         error!("Round {} is handled, but it is unknown!", decided_round);
                     }
@@ -668,7 +662,7 @@ where
             |event: &EventWrapper<TPayload, TGenesisPayload, TPeerId>| match self
                 .ordering_data(event.inner().hash())
             {
-                Ok((round_received, _, _)) => round_received < target_round_received,
+                Ok((round_received, _, _)) => round_received >= target_round_received,
                 Err(OrderingDataError::Undecided) => true,
                 Err(OrderingDataError::UnknownEvent(UnknownEvent(e))) => {
                     panic!("events referenced in events must be tracked {e} is unknown.")
@@ -698,10 +692,6 @@ where
                 Err(OrderingDataError::Undecided) =>
                     trace!("Event does not have ordering data yet, its round_received must be higher than needed; skipping"),
             }
-        }
-        if !init_slice.is_empty() && result.is_empty() {
-            // not necessary undecided, should be fixed
-            return Err(OrderedEventsError::UndecidedRound);
         }
         Ok(result)
     }

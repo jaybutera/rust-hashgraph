@@ -1354,6 +1354,18 @@ fn event_order_correct() {
         finalized.push(event.hash().clone());
     }
 
+    let expected_finalized_names = expected_finalized
+        .iter()
+        .map(|h| names.get(h).unwrap())
+        .collect_vec();
+    let finalized_names = finalized
+        .iter()
+        .map(|h| names.get(h).unwrap())
+        .collect_vec();
+
+    println!("expected: {:?}", expected_finalized_names);
+    println!("got: {:?}", finalized_names);
+
     assert_eq!(finalized, expected_finalized);
 }
 
