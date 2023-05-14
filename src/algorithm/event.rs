@@ -78,7 +78,7 @@ impl std::ops::BitXor for &Signature {
 impl std::ops::BitXor<&Signature> for Signature {
     type Output = Signature;
 
-    fn bitxor(mut self, rhs: &Self) -> Self::Output {
+    fn bitxor(self, rhs: &Self) -> Self::Output {
         Signature(self.0 ^ &rhs.0)
     }
 }

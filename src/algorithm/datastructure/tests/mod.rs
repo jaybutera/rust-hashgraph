@@ -1325,9 +1325,8 @@ fn event_order_correct() {
         mut graph,
         peers_events: peers,
         names,
-        setup_name,
+        setup_name: _,
     } = setup;
-    let signer = MockSigner::<u64, ()>::new();
 
     // exp
     let expected_finalized = vec![

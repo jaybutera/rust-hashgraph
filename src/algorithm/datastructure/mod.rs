@@ -897,15 +897,6 @@ where
         Ok(r)
     }
 
-    fn decide_fame_for_witness(
-        &mut self,
-        event_hash: &event::Hash,
-    ) -> Result<(), WitnessCheckError> {
-        let fame = self.is_famous_witness(event_hash)?;
-        self.witnesses.insert(event_hash.clone(), fame);
-        Ok(())
-    }
-
     /// Determine if the event is famous.
     /// An event is famous if it is a witness and 2/3 of future witnesses strongly see it.
     ///
