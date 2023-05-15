@@ -1,4 +1,4 @@
-use itertools::izip;
+use itertools::{izip, Itertools};
 use serde::Serialize;
 use thiserror::Error;
 use tracing::{debug, error, instrument, trace, warn};
@@ -694,6 +694,16 @@ where
             }
         }
         Ok(result)
+    }
+}
+
+impl<TPayload, TGenesisPayload, TPeerId, TSigner, TClock>
+    Graph<TPayload, TGenesisPayload, TPeerId, TSigner, TClock>
+where
+    TPeerId: Clone,
+{
+    pub fn peers(&self) -> Vec<TPeerId> {
+        self.peer_index.keys().cloned().collect_vec()
     }
 }
 
