@@ -398,7 +398,7 @@ pub mod topsort {
     where
         TPayload: Clone,
         TGenesisPayload: Clone,
-        TPeerId: Eq + std::hash::Hash + Clone,
+        TPeerId: Eq + std::hash::Hash + Clone + Debug,
     {
         let TestSetup {
             graph,

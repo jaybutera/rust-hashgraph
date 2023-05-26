@@ -417,8 +417,9 @@ impl<TPayload, TGenesisPayload, TPeerId, TSigner, TClock>
 where
     TPayload: Clone,
     TGenesisPayload: Clone,
-    TPeerId: Eq + std::hash::Hash + Clone,
+    TPeerId: Eq + std::hash::Hash + Clone + Debug,
 {
+    #[instrument(level = "debug", skip(self))]
     pub fn generate_sync_for(
         &self,
         peer: &TPeerId,
@@ -429,6 +430,10 @@ where
             .get(peer)
             .map(|index| index.known_events())
             .unwrap_or(&empty_set);
+        trace!(
+            "Found {} events that `peer` definitely knows",
+            peer_known_events.len()
+        );
         let tips = self
             .peer_index
             .values()

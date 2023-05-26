@@ -2,6 +2,7 @@ use std::collections::{HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tracing::trace;
 
 use crate::{
     algorithm::event,
@@ -79,21 +80,32 @@ impl<TPayload, TGenesisPayload, TPeerId> Jobs<TPayload, TGenesisPayload, TPeerId
                 None => Some(Err(Error::IncorrectTip(h))),
             })
             .collect::<Result<_, _>>()?;
+        trace!("Have {} sources", sources.len());
         let unknown_sources = sources.into_iter().filter(|h| !peer_knows_event(h));
 
         // Now do topsort with stop at known events
 
         let mut to_visit = VecDeque::from_iter(unknown_sources);
+        trace!(
+            "Starting to traverse from {} sources (filtered known sources)",
+            to_visit.len()
+        );
         // to check removed edges
         let mut visited = HashSet::with_capacity(to_visit.len());
         let mut sorted = Vec::with_capacity(to_visit.len());
         while let Some(next) = to_visit.pop_front() {
+            trace!("Visiting {:?}; checking its out neighbors", next);
             visited.insert(next.clone());
             for affected_neighbor in reversed_state
                 .out_neighbors(&next)
                 .ok_or_else(|| Error::UnknownEvent(next.clone()))?
             {
+                trace!("Checking neighbor {:?}", affected_neighbor);
                 if peer_knows_event(&affected_neighbor) {
+                    trace!(
+                        "Neighbor {:?} is known to the peer, skipping",
+                        affected_neighbor
+                    );
                     continue;
                 }
                 if reversed_state
@@ -102,7 +114,10 @@ impl<TPayload, TGenesisPayload, TPeerId> Jobs<TPayload, TGenesisPayload, TPeerId
                     .into_iter()
                     .all(|in_neighbor| visited.contains(&in_neighbor))
                 {
-                    // All in neighbors of `affected_neighbor` were visited before
+                    trace!(
+                        "All in neighbors of {:?} were visited before",
+                        affected_neighbor
+                    );
                     to_visit.push_back(affected_neighbor)
                 }
             }
@@ -111,6 +126,7 @@ impl<TPayload, TGenesisPayload, TPeerId> Jobs<TPayload, TGenesisPayload, TPeerId
         // note: no loop detection; we assume the graph already has no loops
 
         // Prepare the jobs
+        trace!("Reversing the ordering to get the result");
         sorted.reverse();
         let jobs: Vec<event::SignedEvent<TPayload, TGenesisPayload, TPeerId>> = sorted
             .into_iter()
