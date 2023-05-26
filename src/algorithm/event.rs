@@ -11,6 +11,7 @@ use crate::Timestamp;
 pub struct Hash {
     #[serde(with = "BigArray")]
     inner: [u8; 64],
+    compact: [u8; 4],
 }
 
 impl std::fmt::Display for Hash {
@@ -59,8 +60,29 @@ impl Hash {
         return &self.inner;
     }
 
+    pub fn as_compact(&self) -> &[u8; 4] {
+        return &self.compact;
+    }
+
+    fn xor_bytes(slice: &[u8]) -> u8 {
+        let mut result = 0u8;
+        for b in slice {
+            result ^= b;
+        }
+        result
+    }
+
+    fn calc_compact(inner: &[u8; 64]) -> [u8; 4] {
+        let (a, c) = inner.split_at(32);
+        let (a, b) = a.split_at(16);
+        let (c, d) = c.split_at(48);
+        let [a, b, c, d] = [a, b, c, d].map(Self::xor_bytes);
+        return [a, b, c, d];
+    }
+
     pub const fn from_array(inner: [u8; 64]) -> Self {
-        return Hash { inner };
+        let compact = Self::calc_compact(&inner);
+        return Hash { inner, compact };
     }
 }
 
@@ -415,32 +437,24 @@ mod tests {
 
     fn create_events() -> Result<Vec<EventWrapper<i32, (), u64>>, bincode::Error> {
         let mock_parents_1 = Parents {
-            self_parent: Hash {
-                inner: hex!(
-                    "021ced8799296ceca557832ab941a50b4a11f83478cf141f51f933f653ab9fbc
+            self_parent: Hash::from_array(hex!(
+                "021ced8799296ceca557832ab941a50b4a11f83478cf141f51f933f653ab9fbc
                 c05a037cddbed06e309bf334942c4e58cdf1a46e237911ccd7fcf9787cbc7fd0"
-                ),
-            },
-            other_parent: Hash {
-                inner: hex!(
-                    "a231788464c1d56aab39b098359eb00e2fd12622d85821d8bffe68fdb3044f24
+            )),
+            other_parent: Hash::from_array(hex!(
+                "a231788464c1d56aab39b098359eb00e2fd12622d85821d8bffe68fdb3044f24
                 370e750986e6e4747f6ec0e051ae3e7d2558f7c4d3c4d5ab57362e572abecb36"
-                ),
-            },
+            )),
         };
         let mock_parents_2 = Parents {
-            self_parent: Hash {
-                inner: hex!(
-                    "8a64b55fcfa60235edf16cebbfb36364d6481c3c5ec4de987114ed86c8f252c22
+            self_parent: Hash::from_array(hex!(
+                "8a64b55fcfa60235edf16cebbfb36364d6481c3c5ec4de987114ed86c8f252c22
                 3fadfa820edd589d9c723f032fdf6c9ca95f2fd95c4ffc01808812d8c1bafea"
-                ),
-            },
-            other_parent: Hash {
-                inner: hex!(
-                    "c3ea7982719e7197c63842e41427f358a747e96c7a849b28604569ea101b0bdc5
+            )),
+            other_parent: Hash::from_array(hex!(
+                "c3ea7982719e7197c63842e41427f358a747e96c7a849b28604569ea101b0bdc5
                 6cba63e4a60b95cb29bce01c2e7e3f918d60fa35aa90586770dfc699da0361a"
-                ),
-            },
+            )),
         };
         let results = vec![
             EventWrapper::new_fakely_signed(0, Kind::Genesis(()), 0, 0)?,

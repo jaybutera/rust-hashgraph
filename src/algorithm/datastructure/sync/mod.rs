@@ -96,17 +96,14 @@ impl<TPayload, TGenesisPayload, TPeerId> Jobs<TPayload, TGenesisPayload, TPeerId
         while let Some(next) = to_visit.pop_front() {
             trace!(
                 "Visiting {:?}; checking its out neighbors",
-                &next.as_ref()[60..65]
+                &next.as_compact()
             );
             visited.insert(next.clone());
             for affected_neighbor in reversed_state
                 .out_neighbors(&next)
                 .ok_or_else(|| Error::UnknownEvent(next.clone()))?
             {
-                trace!(
-                    "Checking neighbor {:?}",
-                    &affected_neighbor.as_ref()[60..65]
-                );
+                trace!("Checking neighbor {:?}", &affected_neighbor.as_compact());
                 if peer_knows_event(&affected_neighbor) {
                     trace!("Neighbor is known to the peer, skipping");
                     continue;
