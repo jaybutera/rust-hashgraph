@@ -94,18 +94,21 @@ impl<TPayload, TGenesisPayload, TPeerId> Jobs<TPayload, TGenesisPayload, TPeerId
         let mut visited = HashSet::with_capacity(to_visit.len());
         let mut sorted = Vec::with_capacity(to_visit.len());
         while let Some(next) = to_visit.pop_front() {
-            trace!("Visiting {:?}; checking its out neighbors", next);
+            trace!(
+                "Visiting {:?}; checking its out neighbors",
+                &next.as_ref()[60..65]
+            );
             visited.insert(next.clone());
             for affected_neighbor in reversed_state
                 .out_neighbors(&next)
                 .ok_or_else(|| Error::UnknownEvent(next.clone()))?
             {
-                trace!("Checking neighbor {:?}", affected_neighbor);
+                trace!(
+                    "Checking neighbor {:?}",
+                    &affected_neighbor.as_ref()[60..65]
+                );
                 if peer_knows_event(&affected_neighbor) {
-                    trace!(
-                        "Neighbor {:?} is known to the peer, skipping",
-                        affected_neighbor
-                    );
+                    trace!("Neighbor is known to the peer, skipping");
                     continue;
                 }
                 if reversed_state
@@ -114,10 +117,7 @@ impl<TPayload, TGenesisPayload, TPeerId> Jobs<TPayload, TGenesisPayload, TPeerId
                     .into_iter()
                     .all(|in_neighbor| visited.contains(&in_neighbor))
                 {
-                    trace!(
-                        "All in neighbors of {:?} were visited before",
-                        affected_neighbor
-                    );
+                    trace!("All in neighbors were visited before");
                     to_visit.push_back(affected_neighbor)
                 }
             }
