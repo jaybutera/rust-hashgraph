@@ -2,6 +2,7 @@ use blake2::{Blake2b512, Digest};
 use derive_getters::Getters;
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
+use std::fmt::Debug;
 use thiserror::Error;
 
 use crate::Timestamp;
@@ -297,6 +298,28 @@ where
             fields,
             hash: Hash::from_array(hash_arr),
         })
+    }
+}
+
+impl<TPayload, TGenesisPayload, TPeerId> UnsignedEvent<TPayload, TGenesisPayload, TPeerId>
+where
+    TPayload: Debug,
+    TGenesisPayload: Debug,
+    TPeerId: Debug,
+{
+    pub fn compact_fmt(&self) -> String {
+        let kind_string = match &self.fields.kind {
+            Kind::Genesis(p) => format!("Genesis({:?})", p),
+            Kind::Regular(parents) => format!(
+                "Regular(Parents{{ self_parent: {:?}, other_parent: {:?} }})",
+                parents.self_parent.as_compact(),
+                parents.other_parent.as_compact()
+            ),
+        };
+        format!(
+            "UnsignedEvent {{ user_payload: {:?}, kind: {:?}, author: {:?}, timestamp; {:?}, hash: {:?} }}",
+            self.fields.user_payload, kind_string, self.fields.author, self.fields.timestamp, self.hash.as_compact()
+        ).to_string()
     }
 }
 

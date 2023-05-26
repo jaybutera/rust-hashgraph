@@ -224,7 +224,7 @@ where
     ///
     /// Errors are expected to leave the graph in consistent state
     #[instrument(level = "error", skip_all)]
-    #[instrument(level = "trace", skip(self))]
+    #[instrument(level = "trace", skip_all, fields(event=event.compact_fmt()))]
     pub fn push_event(
         &mut self,
         event: UnsignedEvent<TPayload, TGenesisPayload, TPeerId>,
@@ -232,6 +232,7 @@ where
     ) -> Result<(), PushError<TPeerId>> {
         // Verification first, no changing state
         debug!("Validating the event");
+        trace!("Signature: {:?}", signature);
         let genesis_payload = match event.fields().kind() {
             event::Kind::Genesis(payload) => payload,
             event::Kind::Regular(_) => {
