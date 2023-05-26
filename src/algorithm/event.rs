@@ -75,12 +75,12 @@ impl Hash {
     fn calc_compact(inner: &[u8; 64]) -> [u8; 4] {
         let (a, c) = inner.split_at(32);
         let (a, b) = a.split_at(16);
-        let (c, d) = c.split_at(48);
+        let (c, d) = c.split_at(16);
         let [a, b, c, d] = [a, b, c, d].map(Self::xor_bytes);
         return [a, b, c, d];
     }
 
-    pub const fn from_array(inner: [u8; 64]) -> Self {
+    pub fn from_array(inner: [u8; 64]) -> Self {
         let compact = Self::calc_compact(&inner);
         return Hash { inner, compact };
     }

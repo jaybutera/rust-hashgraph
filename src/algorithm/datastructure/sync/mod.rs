@@ -94,6 +94,9 @@ impl<TPayload, TGenesisPayload, TPeerId> Jobs<TPayload, TGenesisPayload, TPeerId
         let mut visited = HashSet::with_capacity(to_visit.len());
         let mut sorted = Vec::with_capacity(to_visit.len());
         while let Some(next) = to_visit.pop_front() {
+            if visited.contains(&next) {
+                continue;
+            }
             trace!(
                 "Visiting {:?}; checking its out neighbors",
                 &next.as_compact()
@@ -115,7 +118,9 @@ impl<TPayload, TGenesisPayload, TPeerId> Jobs<TPayload, TGenesisPayload, TPeerId
                     .all(|in_neighbor| visited.contains(&in_neighbor))
                 {
                     trace!("All in neighbors were visited before");
-                    to_visit.push_back(affected_neighbor)
+                    if !visited.contains(&affected_neighbor) {
+                        to_visit.push_back(affected_neighbor)
+                    }
                 }
             }
             sorted.push(next);
