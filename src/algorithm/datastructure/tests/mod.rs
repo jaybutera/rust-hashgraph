@@ -1316,8 +1316,46 @@ fn test_ordering_data_correct() {
     );
 }
 
+fn check_recognized_events(setup: TestSetup<(), (), u64>) {
+    let TestSetup {
+        mut graph,
+        peers_events: _,
+        names,
+        setup_name: _,
+    } = setup;
+    let expected_recognized: HashSet<&event::Hash> = names.keys().collect();
+    let mut recognized_ordered = Vec::new();
+    while let Some(next) = graph.next_recognized_event() {
+        recognized_ordered.push(next.hash().clone());
+    }
+    let recognized: HashSet<&event::Hash> = recognized_ordered.iter().collect();
+    assert_eq!(
+        expected_recognized, recognized,
+        "all pushed events must be recognized"
+    );
+    // check partial ordering
+    // (ancestors are always recognized before)
+    for (h, h_prev) in recognized_ordered.iter().enumerate().flat_map(|(i, h)| {
+        recognized_ordered[..i]
+            .iter()
+            .map(move |h_prev| (h, h_prev))
+    }) {
+        // this event must not be an ancestor of all previous
+        assert!(!graph.is_ancestor(h_prev, h), "recognized events must be partially ordered by ancestry relation; {} is an ancestor of {} but placed before in the order", names.get(h).unwrap(), names.get(h_prev).unwrap());
+    }
+}
+
 #[test]
-fn event_order_correct() {
+fn test_recognized_events_returned() {
+    check_recognized_events(build_graph_some_chain((), 999).unwrap());
+    check_recognized_events(build_graph_from_paper((), 999).unwrap());
+    check_recognized_events(build_graph_detailed_example((), 999).unwrap());
+    check_recognized_events(build_graph_index_test((), 999).unwrap());
+    // todo: check fork case
+}
+
+#[test]
+fn test_event_order_correct() {
     let setup =
         build_graph_detailed_example_with_timestamps(0, 999, successors(Some(1), |x| Some(x + 1)))
             .unwrap();
