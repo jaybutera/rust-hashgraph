@@ -132,6 +132,9 @@ pub struct Graph<TPayload, TGenesisPayload, TPeerId, TSigner, TClock> {
     /// If `None` - no rounds decided yet
     last_known_decided_round: Option<usize>,
     ordering: OrderedEvents,
+    /// Events that we've successfully pushed, in the order of push
+    /// (e.g. ancestors before their descendants)
+    recognized_events: VecDeque<event::Hash>,
 
     // probably move to config later
     self_id: TPeerId,
@@ -172,6 +175,7 @@ where
             ordering_data_cache: HashMap::new(),
             last_known_decided_round: None,
             ordering: OrderedEvents::new(),
+            recognized_events: VecDeque::new(),
             coin_frequency,
             signer,
             clock,
@@ -361,6 +365,7 @@ where
         trace!("Tracking the event");
         let hash = new_event.inner().hash().clone();
         self.all_events.insert(hash.clone(), new_event);
+        self.recognized_events.push_front(hash.clone());
 
         // Set round
         trace!("Calculating round");
@@ -403,7 +408,19 @@ where
         Ok(())
     }
 
-    pub fn next_event(&mut self) -> Option<&EventWrapper<TPayload, TGenesisPayload, TPeerId>> {
+    pub fn next_recognized_event(
+        &mut self,
+    ) -> Option<&EventWrapper<TPayload, TGenesisPayload, TPeerId>> {
+        self.recognized_events.pop_back().map(|hash| {
+            self.all_events
+                .get(&hash)
+                .expect("seen events must be tracked")
+        })
+    }
+
+    pub fn next_finalized_event(
+        &mut self,
+    ) -> Option<&EventWrapper<TPayload, TGenesisPayload, TPeerId>> {
         self.ordering.next_event().map(|hash| {
             self.all_events
                 .get(hash)

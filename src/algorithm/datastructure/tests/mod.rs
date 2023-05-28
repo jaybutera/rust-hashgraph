@@ -1349,7 +1349,7 @@ fn event_order_correct() {
         .collect_vec();
 
     let mut finalized = vec![];
-    while let Some(event) = graph.next_event() {
+    while let Some(event) = graph.next_finalized_event() {
         finalized.push(event.hash().clone());
     }
 
