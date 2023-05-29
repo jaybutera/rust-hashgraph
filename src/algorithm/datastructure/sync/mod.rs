@@ -86,6 +86,7 @@ impl<TPayload, TGenesisPayload, TPeerId> Jobs<TPayload, TGenesisPayload, TPeerId
         // Now do topsort with stop at known events
 
         let mut to_visit = VecDeque::from_iter(unknown_sources);
+        let mut to_visit_set = HashSet::new();
         trace!(
             "Starting to traverse from {} sources (filtered known sources)",
             to_visit.len()
@@ -106,6 +107,13 @@ impl<TPayload, TGenesisPayload, TPeerId> Jobs<TPayload, TGenesisPayload, TPeerId
                 .out_neighbors(&next)
                 .ok_or_else(|| Error::UnknownEvent(next.clone()))?
             {
+                if to_visit_set.contains(&affected_neighbor) {
+                    trace!(
+                        "Neighbor {:?} is already scheduled, skipping it",
+                        &affected_neighbor.as_compact()
+                    );
+                    continue;
+                }
                 trace!("Checking neighbor {:?}", &affected_neighbor.as_compact());
                 if peer_knows_event(&affected_neighbor) {
                     trace!("Neighbor is known to the peer, skipping");
@@ -119,6 +127,7 @@ impl<TPayload, TGenesisPayload, TPeerId> Jobs<TPayload, TGenesisPayload, TPeerId
                 {
                     trace!("All in neighbors were visited before");
                     if !visited.contains(&affected_neighbor) {
+                        to_visit_set.insert(affected_neighbor.clone());
                         to_visit.push_back(affected_neighbor)
                     }
                 }
