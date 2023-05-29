@@ -317,7 +317,7 @@ where
             ),
         };
         format!(
-            "UnsignedEvent {{ user_payload: {:?}, kind: {:?}, author: {:?}, timestamp; {:?}, hash: {:?} }}",
+            "UnsignedEvent {{ user_payload: {:?}, kind: {}, author: {:?}, timestamp; {:?}, hash: {:?} }}",
             self.fields.user_payload, kind_string, self.fields.author, self.fields.timestamp, self.hash.as_compact()
         ).to_string()
     }

@@ -793,7 +793,7 @@ where
     /// is a witness.
     ///
     /// Actually calculates the number according to needed properties.
-    #[instrument(level = "debug", skip(self))]
+    #[instrument(level = "trace", skip_all, fields(event=format!("{:?}", event_hash.as_compact())))]
     fn determine_round(&self, event_hash: &event::Hash) -> Result<RoundNum, UnknownEvent> {
         let event = self
             .all_events
