@@ -5,6 +5,7 @@ use tracing::{debug, error, instrument, trace, warn};
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Debug;
+use std::sync::Mutex;
 
 use self::ordering::OrderedEvents;
 use self::peer_index::{PeerIndex, PeerIndexEntry};
@@ -125,7 +126,7 @@ pub struct Graph<TPayload, TGenesisPayload, TPeerId, TSigner, TClock> {
     witnesses: HashMap<event::Hash, WitnessFamousness>,
     /// Cache, shouldn't be relied upon (however seems as reliable as `round_index`)
     round_of: HashMap<event::Hash, RoundNum>,
-    ordering_data_cache: HashMap<event::Hash, (usize, Timestamp, event::Signature)>,
+    ordering_data_cache: Mutex<HashMap<event::Hash, (usize, Timestamp, event::Signature)>>,
     /// The latest round known to have its fame decided. All previous rounds
     /// must be decided as well.
     ///
@@ -172,7 +173,7 @@ where
             round_index: vec![HashSet::new()],
             witnesses: HashMap::new(),
             round_of: HashMap::new(),
-            ordering_data_cache: HashMap::new(),
+            ordering_data_cache: Mutex::new(HashMap::new()),
             last_known_decided_round: None,
             ordering: OrderedEvents::new(),
             recognized_events: VecDeque::new(),
@@ -1119,7 +1120,7 @@ where
     ) -> Result<(usize, Timestamp, event::Signature), OrderingDataError> {
         // is result cached?
         trace!("Checking cache if ordering data is already present there");
-        if let Some(cached) = self.ordering_data_cache.get(event_hash) {
+        if let Some(cached) = self.ordering_data_cache.lock().unwrap().get(event_hash) {
             trace!("Cache hit!");
             return Ok(cached.clone());
         }
@@ -1187,7 +1188,13 @@ where
                     .get(timestamps.len() / 2)
                     .expect("there must be some unique famous witnesses in a round");
                 trace!("Median is {}", consensus_timestamp);
-                return Ok((checked_round, consensus_timestamp, event_signature.clone()));
+                trace!("Caching result");
+                let result = (checked_round, consensus_timestamp, event_signature.clone());
+                self.ordering_data_cache
+                    .lock()
+                    .unwrap()
+                    .insert(event_hash.clone(), result.clone());
+                return Ok(result);
             }
             trace!("The event of interest is NOT an ancestor of them all, continuing..");
         }

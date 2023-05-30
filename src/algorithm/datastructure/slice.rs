@@ -82,10 +82,10 @@ where
     }
 }
 
-impl<'a, TPayload, TGenesisPayload, TPeerId, FContinuw> Iterator
-    for SliceIterator<'a, TPayload, TGenesisPayload, TPeerId, FContinuw>
+impl<'a, TPayload, TGenesisPayload, TPeerId, FContinue> Iterator
+    for SliceIterator<'a, TPayload, TGenesisPayload, TPeerId, FContinue>
 where
-    FContinuw: Fn(&EventWrapper<TPayload, TGenesisPayload, TPeerId>) -> bool,
+    FContinue: Fn(&EventWrapper<TPayload, TGenesisPayload, TPeerId>) -> bool,
     TPayload: Eq + std::hash::Hash,
     TGenesisPayload: Eq + std::hash::Hash,
     TPeerId: Eq + std::hash::Hash,
