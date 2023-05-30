@@ -122,10 +122,19 @@ pub struct Graph<TPayload, TGenesisPayload, TPeerId, TSigner, TClock> {
     peer_index: PeerIndex<TPeerId>,
     /// Consistent and reliable index (should be)
     round_index: Vec<HashSet<event::Hash>>,
-    /// Some(false) means unfamous witness
-    witnesses: HashMap<event::Hash, WitnessFamousness>,
+    /// Some(false) means unfamous witness.
+    ///
+    /// All pushed events are checked for being a witness, thus
+    /// if it's not here, it's not witness.
+    ///
+    /// Also it tracks witness famousness. `Undecided` is yet to change,
+    /// others are expected to be permanent.
+    ///
+    /// The lock should always succeed because only we use this and don't hold it at all
+    witnesses: Mutex<HashMap<event::Hash, WitnessFamousness>>,
     /// Cache, shouldn't be relied upon (however seems as reliable as `round_index`)
     round_of: HashMap<event::Hash, RoundNum>,
+    /// The lock should always succeed because only we use this and don't hold it at all
     ordering_data_cache: Mutex<HashMap<event::Hash, (usize, Timestamp, event::Signature)>>,
     /// The latest round known to have its fame decided. All previous rounds
     /// must be decided as well.
@@ -171,7 +180,7 @@ where
             peer_index: HashMap::new(),
             self_id: self_id.clone(),
             round_index: vec![HashSet::new()],
-            witnesses: HashMap::new(),
+            witnesses: Mutex::new(HashMap::new()),
             round_of: HashMap::new(),
             ordering_data_cache: Mutex::new(HashMap::new()),
             last_known_decided_round: None,
@@ -398,6 +407,8 @@ where
             debug!("Event is a witness, performing additional checks");
             trace!("Adding event to witness index");
             self.witnesses
+                .lock()
+                .unwrap()
                 .insert(hash.clone(), WitnessFamousness::Undecided);
 
             // Update fame of previous rounds, if changed
@@ -865,7 +876,7 @@ where
     fn round_witnesses(&self, r: usize) -> Option<HashSet<&event::Hash>> {
         let all_round_events = self.round_index.get(r)?.iter();
         let witnesses = all_round_events
-            .filter(|e| self.witnesses.contains_key(e))
+            .filter(|e| self.witnesses.lock().unwrap().contains_key(e))
             .collect();
         Some(witnesses)
     }
@@ -917,6 +928,9 @@ where
 
     /// Determines if the event is a witness
     fn determine_witness(&self, event_hash: &event::Hash) -> Result<bool, UnknownEvent> {
+        if self.witnesses.lock().unwrap().contains_key(event_hash) {
+            return Ok(true);
+        }
         let r = match self
             .all_events
             .get(&event_hash)
@@ -939,12 +953,18 @@ where
         &self,
         event_hash: &event::Hash,
     ) -> Result<WitnessFamousness, WitnessCheckError> {
+        // `witnesses` is kind of cache
+        if let Some(famousness) = self.witnesses.lock().unwrap().get(event_hash) {
+            match famousness {
+                WitnessFamousness::Yes | WitnessFamousness::No => return Ok(famousness.clone()),
+                WitnessFamousness::Undecided => (),
+            }
+        }
+
         // Event must be a witness
         if !self.determine_witness(event_hash)? {
             return Err(WitnessCheckError::NotWitness);
         }
-
-        // TODO: use `witnesses` as cache (return famous if so, recalculate if not)
 
         let r = self.round_of(event_hash);
 
@@ -955,7 +975,7 @@ where
         };
         let mut prev_round_votes = HashMap::new();
         for y_hash in this_round_index {
-            if self.witnesses.contains_key(y_hash) {
+            if self.witnesses.lock().unwrap().contains_key(y_hash) {
                 prev_round_votes.insert(y_hash, self.see(y_hash, &event_hash));
             }
         }
@@ -973,7 +993,7 @@ where
             let voter_round = r + d;
             let round_witnesses = this_round_index
                 .iter()
-                .filter(|e| self.witnesses.contains_key(e));
+                .filter(|e| self.witnesses.lock().unwrap().contains_key(e));
             for y_hash in round_witnesses {
                 // The set of witness events in round (y.round-1) that y can strongly see
                 let s = self
@@ -1005,10 +1025,14 @@ where
                         // TODO: move supermajority cond to func
                         // if supermajority, then decide
                         let fame = match v {
-                            // TODO: Maybe save the result?? shouldn't change if decided, right?
                             true => WitnessFamousness::Yes,
                             false => WitnessFamousness::No,
                         };
+                        // Should not change if decided
+                        self.witnesses
+                            .lock()
+                            .unwrap()
+                            .insert(event_hash.clone(), fame.clone());
                         return Ok(fame);
                     } else {
                         this_round_votes.insert(y_hash, v);
