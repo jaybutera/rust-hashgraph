@@ -546,7 +546,7 @@ where
         // Set witness status
         trace!("Checking if the event is witness");
         if self
-            .determine_witness(&hash)
+            .is_witness(&hash)
             .expect("Just inserted to `all_events`")
         {
             debug!("Event is a witness, updating fame and adding events to ordering");
@@ -1013,7 +1013,10 @@ where
     fn round_witnesses(&self, r: usize) -> Option<HashSet<&event::Hash>> {
         let all_round_events = self.round_index.get(r)?.iter();
         let witnesses = all_round_events
-            .filter(|e| self.witnesses.lock().unwrap().contains_key(e))
+            .filter(|e| {
+                self.is_witness(e)
+                    .expect("All events in round index must be tracked")
+            })
             .collect();
         Some(witnesses)
     }
@@ -1063,8 +1066,8 @@ where
         }
     }
 
-    /// Determines if the event is a witness
-    fn determine_witness(&self, event_hash: &event::Hash) -> Result<bool, UnknownEvent> {
+    /// Returns if the event is a witness, determines it if necessary.
+    fn is_witness(&self, event_hash: &event::Hash) -> Result<bool, UnknownEvent> {
         if let Some(cached) = self.witnesses.lock().unwrap().get(event_hash) {
             return Ok(cached.is_witness());
         }
@@ -1101,7 +1104,7 @@ where
         event_hash: &event::Hash,
     ) -> Result<WitnessFamousness, WitnessCheckError> {
         // Event must be a witness
-        if !self.determine_witness(event_hash)? {
+        if !self.is_witness(event_hash)? {
             return Err(WitnessCheckError::NotWitness);
         }
 
@@ -1124,7 +1127,10 @@ where
         };
         let mut prev_round_votes = HashMap::new();
         for y_hash in this_round_index {
-            if self.witnesses.lock().unwrap().contains_key(y_hash) {
+            if self
+                .is_witness(y_hash)
+                .expect("All events in round index must be tracked")
+            {
                 prev_round_votes.insert(y_hash, self.see(y_hash, &event_hash));
             }
         }
@@ -1140,9 +1146,10 @@ where
         for (d, this_round_index) in izip!((2..), next_rounds_indices) {
             let mut this_round_votes = HashMap::new();
             let voter_round = r + d;
-            let round_witnesses = this_round_index
-                .iter()
-                .filter(|e| self.witnesses.lock().unwrap().contains_key(e));
+            let round_witnesses = this_round_index.iter().filter(|e| {
+                self.is_witness(e)
+                    .expect("All events in round index must be tracked")
+            });
             for y_hash in round_witnesses {
                 // The set of witness events in round (y.round-1) that y can strongly see
                 let s = self

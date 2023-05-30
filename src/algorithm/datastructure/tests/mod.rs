@@ -744,7 +744,7 @@ fn test_round_indices_consistent() {
 fn test_determine_witness() {
     run_tests!(
         tested_function_name => "determine_witness",
-        tested_function => |graph, event| graph.determine_witness(&event).expect(&format!("Can't find event {:?}", event)),
+        tested_function => |graph, event| graph.is_witness(&event).expect(&format!("Can't find event {:?}", event)),
         name_lookup => |names, event| names.get(event).unwrap().to_owned(),
         peers_literal => peers,
         tests => [
