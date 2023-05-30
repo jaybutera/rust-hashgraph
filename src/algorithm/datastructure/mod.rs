@@ -3,6 +3,7 @@ use serde::Serialize;
 use thiserror::Error;
 use tracing::{debug, error, instrument, trace, warn};
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Debug;
 use std::sync::Mutex;
@@ -20,6 +21,132 @@ mod peer_index;
 mod slice;
 pub mod sync;
 
+// todo: get rid of spaghetti between WitnessStatus and WitnessFamousness/WitnessUniqueFamousness
+
+/// Not famous witnesses are not checked for
+/// uniqueness, therefore `WitnessUniquenessDecided`
+/// is only for famous witnesses.
+#[derive(Debug, PartialEq, Clone)]
+enum WitnessStatus {
+    /// Famous witness with known uniqueness
+    WitnessUniquenessDecided(WitnessUniqueness),
+    /// Witness with known fame but uniqueness is questionable
+    WitnessFameDecided(WitnessFame),
+    /// Witness but fame is undecided
+    WitnessFameUndecided,
+    NotWitness,
+}
+
+impl WitnessStatus {
+    fn is_witness(&self) -> bool {
+        match self {
+            WitnessStatus::WitnessUniquenessDecided(_)
+            | WitnessStatus::WitnessFameDecided(_)
+            | WitnessStatus::WitnessFameUndecided => true,
+            WitnessStatus::NotWitness => false,
+        }
+    }
+
+    /// Is it a witness with decided fame
+    fn is_fame_decided(&self) -> bool {
+        match self {
+            WitnessStatus::WitnessFameUndecided | WitnessStatus::NotWitness => false,
+            WitnessStatus::WitnessUniquenessDecided(_) | WitnessStatus::WitnessFameDecided(_) => {
+                true
+            }
+        }
+    }
+
+    fn is_famous_witness(&self) -> bool {
+        match self {
+            WitnessStatus::WitnessFameDecided(WitnessFame::Famous)
+            | WitnessStatus::WitnessUniquenessDecided(_) => true,
+            WitnessStatus::WitnessFameUndecided
+            | WitnessStatus::WitnessFameDecided(WitnessFame::NotFamous)
+            | WitnessStatus::NotWitness => false,
+        }
+    }
+
+    /// Is it a famous witness with decided uniqueness
+    fn is_uniqueness_decided(&self) -> bool {
+        match self {
+            WitnessStatus::WitnessUniquenessDecided(_) => true,
+            WitnessStatus::WitnessFameUndecided
+            | WitnessStatus::NotWitness
+            | WitnessStatus::WitnessFameDecided(_) => false,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+enum WitnessUniqueness {
+    Unique,
+    NotUnique,
+}
+
+impl Into<Result<WitnessFamousness, WitnessCheckError>> for WitnessStatus {
+    fn into(self) -> Result<WitnessFamousness, WitnessCheckError> {
+        (&self).into()
+    }
+}
+
+impl Into<Result<WitnessFamousness, WitnessCheckError>> for &WitnessStatus {
+    fn into(self) -> Result<WitnessFamousness, WitnessCheckError> {
+        match self {
+            WitnessStatus::WitnessUniquenessDecided(_) => Ok(WitnessFamousness::Yes),
+            WitnessStatus::WitnessFameDecided(fame) => Ok(fame.into()),
+            WitnessStatus::WitnessFameUndecided => Ok(WitnessFamousness::Undecided),
+            WitnessStatus::NotWitness => Err(WitnessCheckError::NotWitness),
+        }
+    }
+}
+
+impl Into<Result<WitnessUniqueFamousness, WitnessCheckError>> for WitnessStatus {
+    fn into(self) -> Result<WitnessUniqueFamousness, WitnessCheckError> {
+        (&self).into()
+    }
+}
+
+impl Into<Result<WitnessUniqueFamousness, WitnessCheckError>> for &WitnessStatus {
+    fn into(self) -> Result<WitnessUniqueFamousness, WitnessCheckError> {
+        match self {
+            WitnessStatus::WitnessUniquenessDecided(WitnessUniqueness::Unique) => {
+                Ok(WitnessUniqueFamousness::FamousUnique)
+            }
+            WitnessStatus::WitnessUniquenessDecided(WitnessUniqueness::NotUnique) => {
+                Ok(WitnessUniqueFamousness::FamousNotUnique)
+            }
+            WitnessStatus::WitnessFameDecided(WitnessFame::NotFamous) => {
+                Ok(WitnessUniqueFamousness::NotFamous)
+            }
+            WitnessStatus::WitnessFameDecided(WitnessFame::Famous)
+            | WitnessStatus::WitnessFameUndecided => Ok(WitnessUniqueFamousness::Undecided),
+            WitnessStatus::NotWitness => Err(WitnessCheckError::NotWitness),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+enum WitnessFame {
+    Famous,
+    NotFamous,
+}
+
+impl Into<WitnessFamousness> for WitnessFame {
+    fn into(self) -> WitnessFamousness {
+        (&self).into()
+    }
+}
+
+impl Into<WitnessFamousness> for &WitnessFame {
+    fn into(self) -> WitnessFamousness {
+        match self {
+            WitnessFame::Famous => WitnessFamousness::Yes,
+            WitnessFame::NotFamous => WitnessFamousness::No,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 enum WitnessFamousness {
     Yes,
@@ -27,11 +154,28 @@ enum WitnessFamousness {
     Undecided,
 }
 
+impl Into<WitnessStatus> for WitnessFamousness {
+    fn into(self) -> WitnessStatus {
+        (&self).into()
+    }
+}
+
+impl Into<WitnessStatus> for &WitnessFamousness {
+    fn into(self) -> WitnessStatus {
+        match self {
+            WitnessFamousness::Yes => WitnessStatus::WitnessFameDecided(WitnessFame::Famous),
+            WitnessFamousness::No => WitnessStatus::WitnessFameDecided(WitnessFame::NotFamous),
+            WitnessFamousness::Undecided => WitnessStatus::WitnessFameUndecided,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 enum WitnessUniqueFamousness {
     FamousUnique,
     FamousNotUnique,
     NotFamous,
+    // Either fame or uniqueness is not decided
     Undecided,
 }
 
@@ -51,6 +195,7 @@ impl TryFrom<WitnessFamousness> for WitnessUniqueFamousness {
 }
 
 impl WitnessUniqueFamousness {
+    #[allow(unused)]
     fn from_famousness(value: WitnessFamousness, unique: bool) -> Self {
         match (value, unique) {
             (WitnessFamousness::Yes, true) => WitnessUniqueFamousness::FamousUnique,
@@ -131,7 +276,7 @@ pub struct Graph<TPayload, TGenesisPayload, TPeerId, TSigner, TClock> {
     /// others are expected to be permanent.
     ///
     /// The lock should always succeed because only we use this and don't hold it at all
-    witnesses: Mutex<HashMap<event::Hash, WitnessFamousness>>,
+    witnesses: Mutex<HashMap<event::Hash, WitnessStatus>>,
     /// Cache, shouldn't be relied upon (however seems as reliable as `round_index`)
     round_of: HashMap<event::Hash, RoundNum>,
     /// The lock should always succeed because only we use this and don't hold it at all
@@ -404,15 +549,7 @@ where
             .determine_witness(&hash)
             .expect("Just inserted to `all_events`")
         {
-            debug!("Event is a witness, performing additional checks");
-            trace!("Adding event to witness index");
-            self.witnesses
-                .lock()
-                .unwrap()
-                .insert(hash.clone(), WitnessFamousness::Undecided);
-
-            // Update fame of previous rounds, if changed
-            trace!("Updating fame and adding events to ordering");
+            debug!("Event is a witness, updating fame and adding events to ordering");
             self.handle_ordering();
         } else {
             debug!("Event is not a witness");
@@ -928,8 +1065,8 @@ where
 
     /// Determines if the event is a witness
     fn determine_witness(&self, event_hash: &event::Hash) -> Result<bool, UnknownEvent> {
-        if self.witnesses.lock().unwrap().contains_key(event_hash) {
-            return Ok(true);
+        if let Some(cached) = self.witnesses.lock().unwrap().get(event_hash) {
+            return Ok(cached.is_witness());
         }
         let r = match self
             .all_events
@@ -942,6 +1079,16 @@ where
                 self.round_of(event_hash) > self.round_of(self_parent)
             }
         };
+        // should always be vacant because we checked at the beginning of this function
+        // didn't want to take the entry right away to prevent unnecessary cloning of hash
+        if let Entry::Vacant(e) = self.witnesses.lock().unwrap().entry(event_hash.clone()) {
+            let value = if r {
+                WitnessStatus::WitnessFameUndecided
+            } else {
+                WitnessStatus::NotWitness
+            };
+            e.insert(value);
+        }
         Ok(r)
     }
 
@@ -953,18 +1100,20 @@ where
         &self,
         event_hash: &event::Hash,
     ) -> Result<WitnessFamousness, WitnessCheckError> {
-        // `witnesses` is kind of cache
-        if let Some(famousness) = self.witnesses.lock().unwrap().get(event_hash) {
-            match famousness {
-                WitnessFamousness::Yes | WitnessFamousness::No => return Ok(famousness.clone()),
-                WitnessFamousness::Undecided => (),
-            }
-        }
-
         // Event must be a witness
         if !self.determine_witness(event_hash)? {
             return Err(WitnessCheckError::NotWitness);
         }
+
+        // `witnesses` is kind of cache
+        if let Some(famousness) = self.witnesses.lock().unwrap().get(event_hash) {
+            if famousness.is_fame_decided() || !famousness.is_witness() {
+                return famousness.into();
+            }
+        }
+
+        // at this point we know it's a witness with undecided fame
+        // or uncached (must not happen right after determining famousness)
 
         let r = self.round_of(event_hash);
 
@@ -1032,7 +1181,7 @@ where
                         self.witnesses
                             .lock()
                             .unwrap()
-                            .insert(event_hash.clone(), fame.clone());
+                            .insert(event_hash.clone(), (&fame).into());
                         return Ok(fame);
                     } else {
                         this_round_votes.insert(y_hash, v);
@@ -1071,6 +1220,14 @@ where
         &self,
         event_hash: &event::Hash,
     ) -> Result<WitnessUniqueFamousness, WitnessCheckError> {
+        // `witnesses` is kind of cache
+        if let Some(famousness) = self.witnesses.lock().unwrap().get(event_hash) {
+            if famousness.is_uniqueness_decided() || !famousness.is_famous_witness() {
+                return famousness.into();
+            }
+        }
+        // it's either uncached (shouldn't happen) or famous with undecided uniqueness
+
         // Get famousness
         let fame = self.is_famous_witness(event_hash)?;
 
@@ -1119,8 +1276,17 @@ where
             .iter()
             .any(|fame| matches!(fame, Ok(WitnessFamousness::Yes)));
 
-        // TODO: cache?
-        Ok(WitnessUniqueFamousness::from_famousness(fame, unique))
+        let result = if unique {
+            WitnessStatus::WitnessUniquenessDecided(WitnessUniqueness::Unique)
+        } else {
+            WitnessStatus::WitnessUniquenessDecided(WitnessUniqueness::NotUnique)
+        };
+        // cache result
+        self.witnesses
+            .lock()
+            .unwrap()
+            .insert(event_hash.clone(), result.clone());
+        result.into()
     }
 
     /// # Description
