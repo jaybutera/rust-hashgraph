@@ -8,10 +8,11 @@ use thiserror::Error;
 use crate::Timestamp;
 
 // smth like H256 ??? (some hash type)
-#[derive(Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Clone)]
+#[derive(Serialize, Hash, Clone)]
 pub struct Hash {
     #[serde(with = "BigArray")]
     inner: [u8; 64],
+    #[serde(skip)]
     compact: [u8; 4],
 }
 
@@ -52,6 +53,26 @@ impl std::ops::BitXor<&Hash> for Hash {
     }
 }
 
+impl PartialOrd for Hash {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Hash {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.inner.cmp(&other.inner)
+    }
+}
+
+impl PartialEq for Hash {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl Eq for Hash {}
+
 impl Hash {
     pub fn into_array(self) -> [u8; 64] {
         return self.inner;
@@ -84,6 +105,16 @@ impl Hash {
     pub fn from_array(inner: [u8; 64]) -> Self {
         let compact = Self::calc_compact(&inner);
         return Hash { inner, compact };
+    }
+}
+
+impl<'de> Deserialize<'de> for Hash {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = <[u8; 64]>::deserialize(deserializer)?;
+        Ok(Self::from_array(s))
     }
 }
 
@@ -527,5 +558,52 @@ mod tests {
             assert!(!identifiers.contains(n.hash()));
             identifiers.insert(n.hash().clone());
         }
+    }
+
+    #[test]
+    fn hash_operations_work() {
+        let hash1 = Hash::from_array(hex!(
+            "8a64b55fcfa60235edf16cebbfb36364d6481c3c5ec4de987114ed86c8f252c22
+            3fadfa820edd589d9c723f032fdf6c9ca95f2fd95c4ffc01808812d8c1bafea"
+        ));
+        let hash2 = Hash::from_array(hex!(
+            "c3ea7982719e7197c63842e41427f358a747e96c7a849b28604569ea101b0bdc5
+            6cba63e4a60b95cb29bce01c2e7e3f918d60fa35aa90586770dfc699da0361a"
+        ));
+        let expected_xor = Hash::from_array(hex!(
+            "498eccddbe3873a22bc92e0fab94903c710ff550244045b01151846cd8e9591e7
+            53179966a8d6cd56b5cedf1f01a1530d243fd5ecf6dfa466f057d4411bb99f0"
+        ));
+
+        let xor = &hash1 ^ &hash2;
+        assert_eq!(expected_xor, xor);
+        let xor = &hash2 ^ &hash1;
+        assert_eq!(expected_xor, xor);
+        let xor = hash2 ^ &hash1;
+        assert_eq!(expected_xor, xor);
+    }
+
+    #[test]
+    fn hash_serializes() {
+        let hash1 = Hash::from_array(hex!(
+            "8a64b55fcfa60235edf16cebbfb36364d6481c3c5ec4de987114ed86c8f252c22
+            3fadfa820edd589d9c723f032fdf6c9ca95f2fd95c4ffc01808812d8c1bafea"
+        ));
+        let hash2 = Hash::from_array(hex!(
+            "c3ea7982719e7197c63842e41427f358a747e96c7a849b28604569ea101b0bdc5
+            6cba63e4a60b95cb29bce01c2e7e3f918d60fa35aa90586770dfc699da0361a"
+        ));
+
+        let hash1_serialized = bincode::serialize(&hash1).unwrap();
+        let hash2_serialized = bincode::serialize(&hash2).unwrap();
+
+        let hash1_deserialized = bincode::deserialize::<Hash>(&hash1_serialized).unwrap();
+        let hash2_deserialized = bincode::deserialize::<Hash>(&hash2_serialized).unwrap();
+
+        assert_eq!(hash1, hash1_deserialized);
+        assert_eq!(hash2, hash2_deserialized);
+
+        assert_eq!(hash1.as_compact(), hash1_deserialized.as_compact());
+        assert_eq!(hash2.as_compact(), hash2_deserialized.as_compact());
     }
 }
