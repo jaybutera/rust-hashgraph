@@ -30,6 +30,8 @@ pub trait Signer<TGenesisPayload> {
     ) -> bool;
 }
 
+/// Signer that just hashes the hash again
+#[derive(Clone)]
 pub struct MockSigner<I, G>(PhantomData<(I, G)>);
 
 impl<I, G> MockSigner<I, G> {
