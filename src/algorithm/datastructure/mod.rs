@@ -1421,6 +1421,7 @@ where
     /// Target is ancestor of observer, for reference
     fn strongly_see(&self, observer: &event::Hash, target: &event::Hash) -> bool {
         // TODO: Check fork conditions
+        // todo: optimize
         let authors_seen = self
             .ancestor_iter(observer)
             .unwrap()

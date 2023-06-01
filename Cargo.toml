@@ -21,3 +21,10 @@ tracing = "0.1.37"
 [dev-dependencies]
 hex-literal = "0.3.4"
 tracing-subscriber = "0.3.16"
+criterion = { version = "0.4", features = ["html_reports"] }
+rand_chacha = "0.3.1"
+rand = "0.8.5"
+
+[[bench]]
+name = "push_continuous"
+harness = false
